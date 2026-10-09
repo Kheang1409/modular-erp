@@ -1,0 +1,7 @@
+@page "/sales/quotations/{Id:guid}/convert"
+@attribute [Authorize(Policy=SalesPermissions.OrderManage)]
+@inject ISalesOrderService Orders
+@inject IQuotationService Quotations
+@inject NavigationManager Navigation
+<PageTitle>Create sales order</PageTitle><article class="card contacts-card"><h1>Create sales order</h1>@if(_quote is null){<p>Loading...</p>}else{<p>Convert accepted quotation <strong>@_quote.Number</strong>.</p><EditForm Model="Form" OnValidSubmit="Convert" FormName="convert-quotation"><label>Order date <InputDate @bind-Value="Form.OrderDate"/></label><button type="submit">Create sales order</button></EditForm>@if(_error is not null){<p role="alert">@_error</p>}}</article>
+@code{[Parameter]public Guid Id{get;set;}private QuotationDto? _quote;private ConvertForm Form{get;}=new();private string? _error;protected override async Task OnParametersSetAsync()=>_quote=await Quotations.GetAsync(Id,CancellationToken.None);private async Task Convert(){try{var order=await Orders.ConvertAsync(Id,new(_quote!.ConcurrencyStamp,Form.OrderDate),CancellationToken.None);Navigation.NavigateTo($"/sales/orders/{order.Id}");}catch(Exception ex){_error=ex.Message;}}private sealed class ConvertForm{public DateOnly OrderDate{get;set;}=DateOnly.FromDateTime(DateTime.UtcNow);}}

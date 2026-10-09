@@ -1,0 +1,6 @@
+@page "/sales/orders/{Id:guid}/cancel"
+@attribute [Authorize(Policy=SalesPermissions.OrderCancel)]
+@inject ISalesOrderService Orders
+@inject NavigationManager Navigation
+<PageTitle>Cancel sales order</PageTitle><article class="card contacts-card"><h1>Cancel sales order</h1>@if(_item is null){<p>Loading...</p>}else{<p>Cancel <strong>@_item.Number</strong>.</p><button @onclick="Apply">Cancel order</button>@if(_error is not null){<p role="alert">@_error</p>}}</article>
+@code{[Parameter]public Guid Id{get;set;}private SalesOrderDto? _item;private string? _error;protected override async Task OnParametersSetAsync()=>_item=await Orders.GetAsync(Id,CancellationToken.None);private async Task Apply(){try{await Orders.TransitionAsync(Id,SalesOrderState.Cancelled,_item!.ConcurrencyStamp,CancellationToken.None);Navigation.NavigateTo($"/sales/orders/{Id}");}catch(Exception ex){_error=ex.Message;}}}

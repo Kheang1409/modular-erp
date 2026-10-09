@@ -1,0 +1,7 @@
+@page "/sales/quotations/new"
+@attribute [Authorize(Policy = SalesPermissions.QuotationManage)]
+@inject IQuotationService Quotations
+@inject Erp.Abstractions.Currencies.ICurrencyConfigurationService Currencies
+@inject NavigationManager Navigation
+<PageTitle>New quotation</PageTitle><article class="card contacts-card"><p class="eyebrow">Sales</p><h1>New quotation</h1><QuotationEditor Model="Form" OnSubmit="Save" Busy="_busy" Error="@_error" FormName="new-quotation"/></article>
+@code{private Erp.Modules.Sales.Pages.QuotationForm Form{get;}=new();private bool _busy;private string? _error;protected override async Task OnInitializedAsync(){var config=await Currencies.GetAsync(CancellationToken.None);Form.CurrencyCode=config.BaseCurrencyCode;Form.ValidUntil=Form.QuotationDate.AddDays(30);}private async Task Save(){_busy=true;try{var item=await Quotations.CreateAsync(Form.ToRequest(),CancellationToken.None);Navigation.NavigateTo($"/sales/quotations/{item.Id}");}catch(Exception ex){_error=ex.Message;}finally{_busy=false;}}}

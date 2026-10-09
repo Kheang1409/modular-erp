@@ -1,0 +1,5 @@
+@page "/sales/orders"
+@attribute [Authorize(Policy=SalesPermissions.OrderRead)]
+@inject ISalesOrderService Orders
+<PageTitle>Sales orders</PageTitle><article class="card contacts-card"><p class="eyebrow">Sales</p><h1>Sales orders</h1><EditForm Model="Filter" OnValidSubmit="Load" FormName="order-filter"><label>Search <InputText @bind-Value="Filter.Search"/></label><button type="submit">Search</button></EditForm>@if(_page is null){<p>Loading...</p>}else{<table><thead><tr><th>Number</th><th>Customer</th><th>State</th><th>Total</th></tr></thead><tbody>@foreach(var item in _page.Items){<tr><td><a href="@($"/sales/orders/{item.Id}")">@item.Number</a></td><td>@item.CustomerName</td><td>@item.State</td><td>@item.Total.ToString("N2") @item.CurrencyCode</td></tr>}</tbody></table><p>@_page.Total order(s)</p>}</article>
+@code{private SalesOrderPage? _page;private FilterModel Filter{get;}=new();protected override Task OnInitializedAsync()=>Load();private async Task Load()=>_page=await Orders.SearchAsync(new(Filter.Search),CancellationToken.None);private sealed class FilterModel{public string? Search{get;set;}}}

@@ -1,0 +1,6 @@
+@page "/sales/quotations/{Id:guid}/transition"
+@attribute [Authorize(Policy = SalesPermissions.QuotationConfirm)]
+@inject IQuotationService Quotations
+@inject NavigationManager Navigation
+<PageTitle>Quotation actions</PageTitle><article class="card contacts-card"><h1>Quotation actions</h1>@if(_item is null){<p>Loading...</p>}else{<p>@_item.Number is <strong>@_item.State</strong>.</p>@foreach(var target in Targets(_item.State)){<button @onclick="()=>Move(target)">@target</button>}@if(_error is not null){<p role="alert">@_error</p>}}</article>
+@code{[Parameter]public Guid Id{get;set;}private QuotationDto? _item;private string? _error;protected override async Task OnParametersSetAsync()=>_item=await Quotations.GetAsync(Id,CancellationToken.None);private static IReadOnlyList<QuotationState> Targets(QuotationState state)=>state switch{QuotationState.Draft=>[QuotationState.Sent,QuotationState.Cancelled],QuotationState.Sent=>[QuotationState.Accepted,QuotationState.Rejected,QuotationState.Expired,QuotationState.Cancelled],_=>[]};private async Task Move(QuotationState target){try{_item=await Quotations.TransitionAsync(Id,target,_item!.ConcurrencyStamp,CancellationToken.None);Navigation.NavigateTo($"/sales/quotations/{Id}");}catch(Exception ex){_error=ex.Message;}}}

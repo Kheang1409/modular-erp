@@ -1,0 +1,6 @@
+@page "/sales/quotations/{Id:guid}/edit"
+@attribute [Authorize(Policy = SalesPermissions.QuotationManage)]
+@inject IQuotationService Quotations
+@inject NavigationManager Navigation
+<PageTitle>Edit quotation</PageTitle><article class="card contacts-card"><h1>Edit quotation</h1>@if(Form is null){<p>Loading...</p>}else{<QuotationEditor Model="Form" OnSubmit="Save" Busy="_busy" Error="@_error" FormName="edit-quotation"/>}</article>
+@code{[Parameter]public Guid Id{get;set;}private Erp.Modules.Sales.Pages.QuotationForm? Form;private bool _busy;private string? _error;protected override async Task OnParametersSetAsync(){var item=await Quotations.GetAsync(Id,CancellationToken.None);Form=item is null?null:Erp.Modules.Sales.Pages.QuotationForm.From(item);}private async Task Save(){_busy=true;try{var item=await Quotations.UpdateAsync(Id,Form!.ToRequest(),CancellationToken.None);Navigation.NavigateTo($"/sales/quotations/{item.Id}");}catch(Exception ex){_error=ex.Message;}finally{_busy=false;}}}
