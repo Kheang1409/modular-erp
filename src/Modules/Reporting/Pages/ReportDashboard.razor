@@ -1,0 +1,119 @@
+@page "/reports/dashboard"
+@attribute [Authorize(Policy = ReportingPermissions.DashboardPolicy)]
+
+<PageTitle>Company performance</PageTitle>
+
+<div class="entity-page reporting-dashboard" aria-busy="@_loading.ToString().ToLowerInvariant()">
+    <header class="page-heading">
+        <div><p class="eyebrow">Reporting workspace</p><h1>Company performance</h1><p class="muted">@(_organization?.CompanyName ?? "Your current company") · Confirmed transactions and posted financial activity, in one view.</p></div>
+        <span class="dashboard-scope"><span class="scope-dot" aria-hidden="true"></span>Company-scoped data</span>
+    </header>
+
+    @if (!_hasReports && !_loading)
+    {
+        <div class="empty-state"><h2>Reporting access is required</h2><p>Ask your administrator to grant access to at least one report category. No business data has been loaded.</p></div>
+    }
+    else
+    {
+        <section class="card dashboard-filter-panel" aria-label="Dashboard filters">
+            <EditForm Model="_filter" OnSubmit="ApplyFilters" FormName="dashboard-report-filter">
+                <DataAnnotationsValidator />
+                <div class="dashboard-filter-grid">
+                    <label><span>From</span><InputDate @bind-Value="_filter.From" disabled="@_loading" /></label>
+                    <label><span>To</span><InputDate @bind-Value="_filter.To" disabled="@_loading" /></label>
+                    <label><span>Chart currency</span><InputSelect @bind-Value="_currency" aria-label="Chart currency" disabled="@_loading">@foreach (var currency in _currencies) { <option value="@currency">@currency</option> }</InputSelect></label>
+                    <button type="submit" disabled="@_loading">@(_loading ? "Loading..." : "Apply filters")</button>
+                </div>
+                @if (_validationError is not null) { <p class="notice notice-error" role="alert">@_validationError</p> }
+            </EditForm>
+            <p class="filter-help">Currency applies to operational charts only. Financial statements always use @BaseCurrency, the company base currency. Aging and stock use the applied To date.</p>
+        </section>
+
+        @if (_loading)
+        {
+            <div class="dashboard-loading" role="status"><span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Loading your company reports...</div>
+        }
+        else
+        {
+            <div class="dashboard-applied-range" role="status"><span>Applied period: <strong>@_appliedFrom.ToString("d MMM yyyy") – @_appliedTo.ToString("d MMM yyyy")</strong></span><span>Updated @_loadedAt.ToLocalTime().ToString("g")</span></div>
+            @if (_errors.Count != 0)
+            {
+                <div class="notice notice-error" role="alert"><strong>Some report categories could not be loaded.</strong><span>The affected sections show an error instead of a zero value. Apply filters to try again.</span></div>
+            }
+
+            <section class="dashboard-metrics" aria-label="Performance indicators">
+                @if (Ready(ReportingPermissions.Sales)) { <DashboardMetric Label="Confirmed sales" Value="@SalesTotal.ToString("N2")" Unit="@_currency" Caption="@($"{SalesOrders:N0} confirmed orders in this period")" Href="/reports/sales" /> }
+                @if (Ready(ReportingPermissions.Purchasing)) { <DashboardMetric Label="Confirmed purchases" Value="@PurchaseTotal.ToString("N2")" Unit="@_currency" Caption="@($"{PurchaseOrders:N0} confirmed orders in this period")" Tone="teal" Href="/reports/purchasing" /> }
+                @if (Ready(ReportingPermissions.Cash)) { <DashboardMetric Label="Net payment flow" Value="@((CashReceived - CashPaid).ToString("N2"))" Unit="@_currency" Caption="Customer receipts less supplier payments; not a bank balance" Tone="teal" Href="/reports/cash" /> }
+                @if (Ready(ReportingPermissions.Receivables)) { <DashboardMetric Label="Overdue receivables" Value="@OverdueReceivables.ToString("N2")" Unit="@_currency" Caption="@($"Open customer balances overdue as of {_appliedTo:d MMM yyyy}")" Tone="amber" Href="/reports/receivables" /> }
+                @if (Ready(ReportingPermissions.Payables)) { <DashboardMetric Label="Open payables" Value="@OpenPayables.ToString("N2")" Unit="@_currency" Caption="@($"Unpaid supplier balances as of {_appliedTo:d MMM yyyy}")" Tone="rose" Href="/reports/payables" /> }
+                @if (Ready(ReportingPermissions.Financial)) { <DashboardMetric Label="Net income" Value="@Profit.NetIncome.ToString("N2")" Unit="@BaseCurrency" Caption="Posted revenue less posted expenses in this period" Href="/reports/financial" /> }
+                @if (Ready(ReportingPermissions.Inventory)) { <DashboardMetric Label="Tracked products" Value="@_inventory.Select(row => row.ProductId).Distinct().Count().ToString("N0")" Caption="Distinct products with stock history, not a sum of unlike units" Tone="teal" Href="/reports/inventory" /> }
+            </section>
+
+            <div class="dashboard-chart-grid">
+                @if (Allowed(ReportingPermissions.Sales) || Allowed(ReportingPermissions.Purchasing))
+                {
+                    <section class="card dashboard-chart-card">
+                        <div class="section-heading"><h2>Trading overview</h2><span class="status-badge is-neutral">@_currency</span></div>
+                        @if (Failed(ReportingPermissions.Sales) || Failed(ReportingPermissions.Purchasing)) { <p class="chart-error" role="status">The sales and purchase comparison is unavailable because one authorized source failed to load.</p> }
+                        else { <BarChart Title="Sales and purchases" Description="Confirmed order totals, including tax. Only report categories you can access are shown." UnitLabel="@_currency" Points="@TradingPoints" EmptyMessage="No confirmed orders in this currency and period." /> }
+                    </section>
+                }
+                @if (Allowed(ReportingPermissions.Cash))
+                {
+                    <section class="card dashboard-chart-card"><div class="section-heading"><h2>Payment activity</h2><a href="/reports/cash">Cash report</a></div>
+                        @if (Failed(ReportingPermissions.Cash)) { <p class="chart-error" role="status">@_errors[ReportingPermissions.Cash]</p> }
+                        else { <BarChart Title="Receipts and payments" Description="Posted customer receipts and supplier payments; this chart does not represent a bank balance." UnitLabel="@_currency" Points="@CashPoints" EmptyMessage="No posted payments in this currency and period." /> }
+                    </section>
+                }
+                @if (Allowed(ReportingPermissions.Sales))
+                {
+                    <section class="card dashboard-chart-card"><div class="section-heading"><h2>Customer performance</h2><a href="/reports/sales">Sales detail</a></div>
+                        @if (Failed(ReportingPermissions.Sales)) { <p class="chart-error" role="status">@_errors[ReportingPermissions.Sales]</p> }
+                        else { <BarChart Title="Top customers" Description="The six highest confirmed sales totals for the selected currency and period." UnitLabel="@_currency" Points="@DashboardCalculations.TopCustomers(_customers, _currency)" EmptyMessage="No customer sales in this currency and period." /> }
+                    </section>
+                    <section class="card dashboard-chart-card"><div class="section-heading"><h2>Product performance</h2><a href="/reports/sales">Product detail</a></div>
+                        @if (Failed(ReportingPermissions.Sales)) { <p class="chart-error" role="status">@_errors[ReportingPermissions.Sales]</p> }
+                        else { <BarChart Title="Top products by sales value" Description="The six highest confirmed sales totals. Quantities are not combined across unlike product units." UnitLabel="@_currency" Points="@DashboardCalculations.TopProducts(_products, _currency)" EmptyMessage="No product sales in this currency and period." /> }
+                    </section>
+                }
+                @if (Allowed(ReportingPermissions.Receivables))
+                {
+                    <section class="card dashboard-chart-card"><div class="section-heading"><h2>Receivables aging</h2><a href="/reports/receivables">Customer balances</a></div>
+                        @if (Failed(ReportingPermissions.Receivables)) { <p class="chart-error" role="status">@_errors[ReportingPermissions.Receivables]</p> }
+                        else { <BarChart Title="Customer balances by age" Description="Open invoice balances by days overdue, as of the applied To date." UnitLabel="@_currency" Points="@DashboardCalculations.AgingBuckets(_receivables, _currency, "amber")" EmptyMessage="No open customer balances in this currency." /> }
+                    </section>
+                }
+                @if (Allowed(ReportingPermissions.Payables))
+                {
+                    <section class="card dashboard-chart-card"><div class="section-heading"><h2>Payables aging</h2><a href="/reports/payables">Supplier balances</a></div>
+                        @if (Failed(ReportingPermissions.Payables)) { <p class="chart-error" role="status">@_errors[ReportingPermissions.Payables]</p> }
+                        else { <BarChart Title="Supplier balances by age" Description="Open bill balances by days overdue, as of the applied To date." UnitLabel="@_currency" Points="@DashboardCalculations.AgingBuckets(_payables, _currency, "rose")" EmptyMessage="No open supplier balances in this currency." /> }
+                    </section>
+                }
+                @if (Allowed(ReportingPermissions.Financial))
+                {
+                    <section class="card dashboard-chart-card"><div class="section-heading"><h2>Financial performance</h2><a href="/reports/financial">Financial statements</a></div>
+                        @if (Failed(ReportingPermissions.Financial)) { <p class="chart-error" role="status">@_errors[ReportingPermissions.Financial]</p> }
+                        else { <BarChart Title="Revenue, expenses and net income" Description="Posted journal amounts in the company base currency; operational currency selection does not change these figures." UnitLabel="@BaseCurrency" Points="@FinancialPoints" EmptyMessage="No posted revenue or expenses in this period." /> }
+                    </section>
+                }
+                @if (Allowed(ReportingPermissions.Inventory))
+                {
+                    <section class="card dashboard-chart-card"><div class="section-heading"><h2>Stock availability</h2><a href="/reports/inventory">Inventory detail</a></div>
+                        @if (Failed(ReportingPermissions.Inventory)) { <p class="chart-error" role="status">@_errors[ReportingPermissions.Inventory]</p> }
+                        else if (_inventory.Count == 0) { <div class="chart-empty"><span aria-hidden="true">↗</span><p>No stock history as of this date.</p></div> }
+                        else
+                        {
+                            <p class="muted">On-hand stock is as of @_appliedTo.ToString("d MMM yyyy"). Reserved quantities are current active reservations, not a historical reservation snapshot. Totals are kept separate by unit.</p>
+                            <div class="stock-summary"><span><strong>@_inventory.Select(row => row.LocationId).Distinct().Count()</strong> locations</span><span><strong>@_inventory.Count(row => row.Available <= 0)</strong> product/location rows with no availability</span></div>
+                            <div class="table-scroll" tabindex="0"><table><caption>Stock totals by unit</caption><thead><tr><th scope="col">Unit</th><th scope="col">On hand</th><th scope="col">Current reserved</th><th scope="col">Available</th></tr></thead><tbody>@foreach (var group in _inventory.GroupBy(row => row.UnitCode).OrderBy(group => group.Key)) { <tr><th scope="row">@group.Key</th><td>@group.Sum(row => row.OnHand).ToString("N2")</td><td>@group.Sum(row => row.Reserved).ToString("N2")</td><td>@group.Sum(row => row.Available).ToString("N2")</td></tr> }</tbody></table></div>
+                        }
+                    </section>
+                }
+            </div>
+            <p class="dashboard-footnote">Figures use existing company-scoped report sources. Different currencies are never added together. Drafts are excluded from confirmed sales and purchases; financial and payment figures use posted transactions.</p>
+        }
+    }
+</div>

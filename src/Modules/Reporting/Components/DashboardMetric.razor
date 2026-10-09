@@ -1,0 +1,15 @@
+<article class="dashboard-metric dashboard-metric-@Tone">
+    <p class="metric-label">@Label</p>
+    <div class="metric-value">@Value @if (!string.IsNullOrEmpty(Unit)) { <small>@Unit</small> }</div>
+    <p class="metric-caption">@Caption</p>
+    @if (Href is not null) { <a href="@Href">View report <span aria-hidden="true">↗</span></a> }
+</article>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string Value { get; set; } = string.Empty;
+    [Parameter] public string Unit { get; set; } = string.Empty;
+    [Parameter] public string Caption { get; set; } = string.Empty;
+    [Parameter] public string Tone { get; set; } = "blue";
+    [Parameter] public string? Href { get; set; }
+}

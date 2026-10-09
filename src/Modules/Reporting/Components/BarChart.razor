@@ -1,0 +1,75 @@
+@using System.Globalization
+
+<figure class="report-chart">
+    <figcaption><h3 id="@TitleId">@Title</h3><p id="@DescriptionId" class="muted">@Description</p></figcaption>
+    @if (Points.Count == 0)
+    {
+        <div class="chart-empty"><span aria-hidden="true">↗</span><p>@EmptyMessage</p></div>
+    }
+    else
+    {
+        <svg class="bar-chart" viewBox="@($"0 0 600 {Height}")" role="img" aria-labelledby="@($"{TitleId} {DescriptionId}")" preserveAspectRatio="xMidYMid meet">
+            <title>@Title</title>
+            <desc>@Description. Exact values are available in the chart data table below.</desc>
+            <line class="chart-baseline" x1="@Number(ZeroX)" y1="12" x2="@Number(ZeroX)" y2="@(Height - 28)" />
+            @for (var index = 0; index < Points.Count; index++)
+            {
+                var point = Points[index];
+                var rowY = 18 + index * 46;
+                var valueX = Position(point.Value);
+                var barX = Math.Min(ZeroX, valueX);
+                var barWidth = Math.Abs(valueX - ZeroX);
+                <g>
+                    <title>@point.Label: @ExactValue(point.Value) @UnitLabel</title>
+                    <text class="chart-row-label chart-desktop-label" x="0" y="@(rowY + 19)">@ShortLabel(point.Label)</text>
+                    <text class="chart-row-label chart-mobile-label" x="0" y="@(rowY + 21)" aria-hidden="true">@MobileLabel(point.Label)</text>
+                    <rect class="@ColorClass(point.Color)" x="@Number(barX)" y="@rowY" width="@Number(barWidth)" height="28" rx="4" />
+                    <text class="chart-value chart-desktop-label" x="594" y="@(rowY + 19)" text-anchor="end">@point.Value.ToString("N2")</text>
+                    <text class="chart-value chart-mobile-label" x="594" y="@(rowY + 21)" text-anchor="end" aria-hidden="true">@CompactValue(point.Value)</text>
+                </g>
+            }
+            <text class="chart-axis-label" x="@Number(ZeroX)" y="@(Height - 8)" text-anchor="middle">0</text>
+        </svg>
+        <p class="chart-mobile-hint">K = thousand, M = million, B = billion. Exact values below.</p>
+        <details class="chart-data">
+            <summary>View chart data</summary>
+            <div class="table-scroll" tabindex="0"><table><caption>@Title — @UnitLabel</caption><thead><tr><th scope="col">Category</th><th scope="col">Value (@UnitLabel)</th></tr></thead><tbody>
+                @foreach (var point in Points) { <tr><th scope="row">@point.Label</th><td>@ExactValue(point.Value)</td></tr> }
+            </tbody></table></div>
+        </details>
+    }
+</figure>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter] public string Description { get; set; } = string.Empty;
+    [Parameter] public string UnitLabel { get; set; } = "Amount";
+    [Parameter] public string EmptyMessage { get; set; } = "No activity for these filters.";
+    [Parameter, EditorRequired] public IReadOnlyList<DashboardChartPoint> Points { get; set; } = [];
+    private readonly string _chartId = $"chart-{Guid.NewGuid():N}";
+    private string TitleId => $"{_chartId}-title";
+    private string DescriptionId => $"{_chartId}-description";
+    private int Height => Points.Count * 46 + 48;
+    private double Minimum => Math.Min(0, Points.Min(point => (double)point.Value));
+    private double Maximum => Math.Max(0, Points.Max(point => (double)point.Value));
+    private double Range => Maximum - Minimum == 0 ? 1 : Maximum - Minimum;
+    private double ZeroX => 190 + (0 - Minimum) / Range * 275;
+    private double Position(decimal value) => 190 + ((double)value - Minimum) / Range * 275;
+    private static string Number(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);
+    private static string ShortLabel(string label) => label.Length > 23 ? $"{label[..22]}…" : label;
+    private static string MobileLabel(string label) => label.Length > 13 ? $"{label[..12]}…" : label;
+    private static string ExactValue(decimal value) => value.ToString("#,##0.00##########################", CultureInfo.CurrentCulture);
+    private static string CompactValue(decimal value)
+    {
+        var magnitude = Math.Abs(value);
+        return magnitude switch
+        {
+            >= 1_000_000_000m => $"{value / 1_000_000_000m:0.#}B",
+            >= 1_000_000m => $"{value / 1_000_000m:0.#}M",
+            >= 1_000m => $"{value / 1_000m:0.#}K",
+            > 0 and < 1m => value.ToString("G4", CultureInfo.CurrentCulture),
+            _ => value.ToString("0.##", CultureInfo.CurrentCulture)
+        };
+    }
+    private static string ColorClass(string color) => color switch { "teal" => "chart-bar chart-bar-teal", "amber" => "chart-bar chart-bar-amber", "rose" => "chart-bar chart-bar-rose", _ => "chart-bar chart-bar-blue" };
+}

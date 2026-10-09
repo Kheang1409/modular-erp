@@ -1,0 +1,104 @@
+<section class="report-visual-summary" aria-label="Visual report summary">
+    <div class="section-heading">
+        <div><p class="eyebrow">At a glance</p><h2>Visual summary</h2></div>
+        @if (_choices.Count > 0)
+        {
+            <label class="chart-selector" for="@_selectorId">@(Kind == ReportVisualizationKind.Inventory ? "Unit of measure" : "Chart currency")
+                <select id="@_selectorId" aria-label="@(Kind == ReportVisualizationKind.Inventory ? "Unit of measure" : "Chart currency")" @bind="_selection">
+                    @foreach (var choice in _choices) { <option value="@choice">@choice</option> }
+                </select>
+            </label>
+        }
+    </div>
+    @if (Kind == ReportVisualizationKind.Inventory)
+    {
+        <p class="muted">Quantities are kept separate by unit. On-hand stock follows the report date; reservations reflect currently active reservations.</p>
+    }
+    else if (Kind == ReportVisualizationKind.Financial)
+    {
+        <p class="muted">Posted amounts in the company's base currency. Net income is revenue less expenses.</p>
+    }
+    else
+    {
+        <p class="muted">Each chart uses one currency. Use the detail tables and exports below to reconcile exact figures.</p>
+    }
+    <div class="row g-3">
+        @foreach (var chart in Charts())
+        {
+            <div class="col-12 col-xl-6">
+                <BarChart Title="@chart.Title" Description="@chart.Description" UnitLabel="@UnitLabel" Points="chart.Points" EmptyMessage="No report data for these filters." />
+            </div>
+        }
+    </div>
+</section>
+
+@code {
+    [Parameter] public ReportVisualizationKind Kind { get; set; }
+    [Parameter] public IReadOnlyList<SalesSummaryReportRow> Sales { get; set; } = [];
+    [Parameter] public IReadOnlyList<SalesByCustomerReportRow> Customers { get; set; } = [];
+    [Parameter] public IReadOnlyList<SalesByProductReportRow> Products { get; set; } = [];
+    [Parameter] public IReadOnlyList<PurchaseSummaryReportRow> Purchases { get; set; } = [];
+    [Parameter] public IReadOnlyList<InventoryOnHandReportRow> Inventory { get; set; } = [];
+    [Parameter] public IReadOnlyList<FinancialAccountReportRow> Profit { get; set; } = [];
+    [Parameter] public IReadOnlyList<FinancialAccountReportRow> Balance { get; set; } = [];
+    [Parameter] public IReadOnlyList<AgingReportRow> Aging { get; set; } = [];
+    [Parameter] public IReadOnlyList<CashSummaryRow> Cash { get; set; } = [];
+    private readonly string _selectorId = $"report-chart-selection-{Guid.NewGuid():N}";
+    private IReadOnlyList<string> _choices = [];
+    private string _selection = string.Empty;
+    private string UnitLabel => Kind == ReportVisualizationKind.Financial ? "Company base currency" : string.IsNullOrEmpty(_selection) ? "Amount" : _selection;
+
+    protected override void OnParametersSet()
+    {
+        IEnumerable<string> choices = Kind switch
+        {
+            ReportVisualizationKind.Sales => Sales.Select(row => row.CurrencyCode).Concat(Customers.Select(row => row.CurrencyCode)).Concat(Products.Select(row => row.CurrencyCode)),
+            ReportVisualizationKind.Purchasing => Purchases.Select(row => row.CurrencyCode),
+            ReportVisualizationKind.Inventory => Inventory.Select(row => row.UnitCode),
+            ReportVisualizationKind.Receivables or ReportVisualizationKind.Payables => Aging.Select(row => row.CurrencyCode),
+            ReportVisualizationKind.Cash => Cash.Select(row => row.CurrencyCode),
+            _ => []
+        };
+        _choices = choices.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (!_choices.Contains(_selection, StringComparer.OrdinalIgnoreCase)) _selection = _choices.FirstOrDefault() ?? string.Empty;
+    }
+
+    private IEnumerable<Visualization> Charts()
+    {
+        switch (Kind)
+        {
+            case ReportVisualizationKind.Sales:
+                yield return new("Leading customers", "Confirmed sales by customer in the selected currency.", DashboardCalculations.TopCustomers(Customers, _selection));
+                yield return new("Leading products", "Confirmed sales by product in the selected currency.", DashboardCalculations.TopProducts(Products, _selection));
+                break;
+            case ReportVisualizationKind.Purchasing:
+                var purchases = Purchases.Where(row => DashboardCalculations.SameCurrency(row.CurrencyCode, _selection)).ToList();
+                yield return new("Purchase composition", "Confirmed purchase subtotal, discount, tax, and total in one currency.", purchases.Count == 0 ? [] :
+                    [new("Subtotal", purchases.Sum(row => row.Subtotal)), new("Discount", purchases.Sum(row => row.Discount), "amber"), new("Tax", purchases.Sum(row => row.Tax), "rose"), new("Total", purchases.Sum(row => row.Total), "teal")]);
+                break;
+            case ReportVisualizationKind.Inventory:
+                var inventory = Inventory.Where(row => string.Equals(row.UnitCode, _selection, StringComparison.OrdinalIgnoreCase)).ToList();
+                yield return new("Stock composition", "On-hand stock, current reservations, and available quantities in one unit of measure.", inventory.Count == 0 ? [] :
+                    [new("On hand", inventory.Sum(row => row.OnHand)), new("Reserved now", inventory.Sum(row => row.Reserved), "amber"), new("Available", inventory.Sum(row => row.Available), "teal")]);
+                break;
+            case ReportVisualizationKind.Financial:
+                var financial = DashboardCalculations.ProfitAndLoss(Profit);
+                yield return new("Income and expenses", "Posted revenue and expenses, with natural accounting signs preserved.", Profit.Count == 0 ? [] :
+                    [new("Revenue", financial.Revenue), new("Expenses", financial.Expenses, "amber"), new("Net income", financial.NetIncome, "teal")]);
+                yield return new("Balance sheet structure", "Posted balances grouped by account type in the company base currency.", Balance.GroupBy(row => row.Type)
+                    .Select(group => new DashboardChartPoint(group.Key, group.Sum(row => row.Balance), group.Key == "Asset" ? "blue" : "teal")).ToList());
+                break;
+            case ReportVisualizationKind.Receivables:
+            case ReportVisualizationKind.Payables:
+                yield return new("Aging profile", "Open amounts by due-date bucket in the selected currency.", DashboardCalculations.AgingBuckets(Aging, _selection, Kind == ReportVisualizationKind.Receivables ? "blue" : "amber"));
+                break;
+            case ReportVisualizationKind.Cash:
+                yield return new("Cash receipts and payments", "Posted payments grouped by direction in the selected currency.", Cash.Where(row => DashboardCalculations.SameCurrency(row.CurrencyCode, _selection)).GroupBy(row => row.Direction)
+                    .Select(group => new DashboardChartPoint(group.Key == "CustomerReceipt" ? "Customer receipts" : group.Key == "SupplierPayment" ? "Supplier payments" : group.Key,
+                        group.Sum(row => row.Amount), group.Key == "CustomerReceipt" ? "teal" : "amber")).ToList());
+                break;
+        }
+    }
+
+    private sealed record Visualization(string Title, string Description, IReadOnlyList<DashboardChartPoint> Points);
+}
