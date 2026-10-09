@@ -1,0 +1,27 @@
+@page "/account/denied"
+@attribute [AllowAnonymous]
+@inject Microsoft.AspNetCore.Http.IHttpContextAccessor HttpContextAccessor
+
+<PageTitle>Access denied</PageTitle>
+
+<div class="entity-page">
+    <div class="page-heading">
+        <div><p class="eyebrow">Access settings</p><h1>Access denied</h1><p class="muted">Your account does not have access to this page or company.</p></div>
+    </div>
+    <section class="card">
+        <h2>Choose an available workspace</h2>
+        <p>Use the company selector for a company assigned to your account. If you need additional access, ask your organization administrator.</p>
+        <div class="heading-actions">
+            <a class="button" href="/">Back to home</a>
+            <a class="button button-secondary" href="/account/login">Sign in with another account</a>
+        </div>
+    </section>
+</div>
+
+@code {
+    protected override void OnInitialized()
+    {
+        if (HttpContextAccessor.HttpContext is { Response.HasStarted: false } context)
+            context.Response.StatusCode = Microsoft.AspNetCore.Http.StatusCodes.Status403Forbidden;
+    }
+}

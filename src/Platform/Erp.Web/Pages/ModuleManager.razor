@@ -1,0 +1,134 @@
+@page "/administration/modules"
+@attribute [Authorize(Policy = PlatformPermissions.ModuleManage)]
+@inject HttpClient Http
+
+<PageTitle>Module manager</PageTitle>
+
+<article class="card contacts-card">
+    <p class="eyebrow">Administration</p>
+    <h1>Module manager</h1>
+    <p class="muted">Install only modules whose source and publisher you trust. Server modules run with the host's privileges and are not sandboxed.</p>
+
+    @if (!string.IsNullOrWhiteSpace(_message))
+    {
+        <div class="notice @(_failed ? "notice-error" : "notice-success")" role="status">@_message</div>
+    }
+
+    <section class="line-section" aria-labelledby="package-heading">
+        <div class="section-heading"><div><p class="eyebrow">Package lifecycle</p><h2 id="package-heading">Install or update</h2></div></div>
+        <p class="muted">Choose a signed or checksum-validated <code>.erpmod</code> archive. Validate first when reviewing a new publisher.</p>
+        <InputFile OnChange="SelectPackage" accept=".erpmod,.zip" />
+        @if (_package is not null)
+        {
+            <p><strong>@_package.Name</strong> <span class="muted">@FormatBytes(_package.Size)</span></p>
+            <div class="action-bar">
+                <button type="button" class="button-secondary" disabled="@_busy" @onclick="ValidatePackage">Validate</button>
+                <button type="button" disabled="@_busy" @onclick="InstallPackage">Install</button>
+                <button type="button" class="button-secondary" disabled="@_busy" @onclick="UpdatePackage">Update existing</button>
+            </div>
+        }
+    </section>
+
+    <div class="section-heading"><div><p class="eyebrow">Restart activation</p><h2>Installed modules</h2></div><button type="button" class="button-secondary" @onclick="Load">Refresh</button></div>
+    @if (_modules is null)
+    {
+        <p class="muted">Loading modules…</p>
+    }
+    else if (_modules.Count == 0)
+    {
+        <p class="muted">No external modules are installed.</p>
+    }
+    else
+    {
+        <div class="table-scroll" tabindex="0">
+            <table>
+                <thead><tr><th>Module</th><th>Version</th><th>Status</th><th>Activation</th></tr></thead>
+                <tbody>
+                    @foreach (var module in _modules)
+                    {
+                        <tr>
+                            <td><strong>@module.Name</strong><br /><small class="muted">@module.Id</small></td>
+                            <td>@module.Version</td>
+                            <td><span class="badge @(module.Enabled ? "success" : "neutral")">@(module.Enabled ? "Enabled" : "Disabled")</span></td>
+                            <td><button type="button" class="button-secondary" disabled="@_busy" @onclick="() => Toggle(module)">@(module.Enabled ? "Disable" : "Enable")</button></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</article>
+
+@code {
+    private IReadOnlyList<ModulePackageInfo>? _modules;
+    private IBrowserFile? _package;
+    private string? _message;
+    private bool _failed;
+    private bool _busy;
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        try { _modules = await Http.GetFromJsonAsync<List<ModulePackageInfo>>("api/v1/platform/modules/") ?? []; }
+        catch (Exception exception) { ShowError(exception.Message); }
+    }
+
+    private void SelectPackage(InputFileChangeEventArgs args)
+    {
+        _package = args.File;
+        _message = null;
+    }
+
+    private async Task Upload(string operation)
+    {
+        if (_package is null) return;
+        _busy = true;
+        try
+        {
+            await using var file = _package.OpenReadStream(50 * 1024 * 1024);
+            using var content = new StreamContent(file);
+            content.Headers.ContentType = new("application/vnd.open-erp.module");
+            using var response = await Http.PostAsync($"api/v1/platform/modules/{operation}", content);
+            await EnsureSuccess(response);
+            var module = await response.Content.ReadFromJsonAsync<ModulePackageInfo>();
+            _message = operation == "validate"
+                ? $"{module?.Name} {module?.Version} passed package validation."
+                : $"{module?.Name} {module?.Version} was {operation}ed. Restart the application to activate the change.";
+            _failed = false;
+            await Load();
+        }
+        catch (Exception exception) { ShowError(exception.Message); }
+        finally { _busy = false; }
+    }
+
+    private Task ValidatePackage() => Upload("validate");
+    private Task InstallPackage() => Upload("install");
+    private Task UpdatePackage() => Upload("update");
+
+    private async Task Toggle(ModulePackageInfo module)
+    {
+        _busy = true;
+        try
+        {
+            var operation = module.Enabled ? "disable" : "enable";
+            using var response = await Http.PostAsync($"api/v1/platform/modules/{Uri.EscapeDataString(module.Id)}/{operation}", null);
+            await EnsureSuccess(response);
+            _message = $"{module.Name} will be {operation}d after the application restarts.";
+            _failed = false;
+            await Load();
+        }
+        catch (Exception exception) { ShowError(exception.Message); }
+        finally { _busy = false; }
+    }
+
+    private static async Task EnsureSuccess(HttpResponseMessage response)
+    {
+        if (response.IsSuccessStatusCode) return;
+        var problem = await response.Content.ReadFromJsonAsync<Microsoft.AspNetCore.Mvc.ProblemDetails>();
+        throw new InvalidOperationException(problem?.Title ?? $"Request failed with status {(int)response.StatusCode}.");
+    }
+
+    private void ShowError(string message) { _message = message; _failed = true; }
+    private static string FormatBytes(long bytes) => bytes < 1024 * 1024 ? $"{bytes / 1024d:F1} KB" : $"{bytes / 1024d / 1024d:F1} MB";
+}

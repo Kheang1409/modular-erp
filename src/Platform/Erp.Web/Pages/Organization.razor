@@ -1,0 +1,155 @@
+@page "/organization"
+@attribute [Authorize(Policy = PlatformPermissions.OrganizationRead)]
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject IOrganizationContextReader OrganizationReader
+@inject IOrganizationAdministrationService Organizations
+@inject NavigationManager NavigationManager
+
+<PageTitle>Organization and companies</PageTitle>
+
+<div class="entity-page">
+    <div class="page-heading">
+        <div><p class="eyebrow">Workspace administration</p><h1>Organization and companies</h1><p class="muted">Operate several companies inside one organization while keeping transactions and settings company-specific.</p></div>
+        @if (_canManage) { <button type="button" @onclick="BeginCreate">Add company</button> }
+    </div>
+    @if (_error is not null) { <div class="notice notice-error" role="alert"><strong>Could not complete that action</strong><span>@_error</span></div> }
+    @if (_message is not null) { <div class="notice notice-success" role="status">@_message</div> }
+
+    @if (_organization is null)
+    {
+        <div class="empty-state"><span class="empty-state-icon" aria-hidden="true">&#9675;</span><h2>No company assigned</h2><p>Ask an administrator to add your account to an active company.</p></div>
+    }
+    else
+    {
+        <section class="detail-grid organization-summary" aria-label="Active workspace">
+            <article class="detail-panel"><p class="eyebrow">Organization</p><h2>@_organization.TenantName</h2><p class="muted">Shared users, roles, modules, and governance.</p>@if (_canManage) { <button type="button" class="button-secondary button-small" @onclick="BeginOrganizationEdit">Edit organization</button> }</article>
+            <article class="detail-panel active-company-panel">
+                <p class="eyebrow">Current company</p><h2>@_organization.CompanyName <span class="status-badge is-success">Active</span></h2>
+                <dl class="details compact-details"><dt>Code</dt><dd>@_organization.CompanyCode</dd><dt>Currency</dt><dd>@_organization.BaseCurrencyCode</dd><dt>Time zone</dt><dd>@_organization.TimeZoneId</dd></dl>
+            </article>
+        </section>
+    }
+
+    @if (_organizationEditor is not null)
+    {
+        <section class="card company-editor" aria-labelledby="organization-editor-title">
+            <div class="section-heading"><h2 id="organization-editor-title">Organization settings</h2><button type="button" class="button-secondary button-small" disabled="@_busy" @onclick="() => _organizationEditor = null">Cancel</button></div>
+            <EditForm Model="_organizationEditor" OnValidSubmit="SaveOrganization" FormName="organization-settings">
+                <DataAnnotationsValidator /><ValidationSummary />
+                <div class="form-grid">
+                    <label><span>Organization name <span class="required-marker">*</span></span><InputText @bind-Value="_organizationEditor.Name" maxlength="200" /><ValidationMessage For="() => _organizationEditor.Name" /></label>
+                    <label><span>Organization time zone <span class="required-marker">*</span></span><InputText @bind-Value="_organizationEditor.TimeZoneId" maxlength="100" /><small>Company time zones are configured separately</small><ValidationMessage For="() => _organizationEditor.TimeZoneId" /></label>
+                </div>
+                <div class="form-actions"><button type="submit" disabled="@_busy">@(_busy ? "Saving..." : "Save organization")</button></div>
+            </EditForm>
+        </section>
+    }
+
+    @if (_editing is not null)
+    {
+        <section class="card company-editor" aria-labelledby="company-editor-title">
+            <div class="section-heading"><div><p class="eyebrow">@(_editing.Id is null ? "New company" : "Company settings")</p><h2 id="company-editor-title">@(_editing.Id is null ? "Add a company" : $"Edit {_editing.Name}")</h2></div><button type="button" class="button-secondary button-small" @onclick="CancelEdit">Cancel</button></div>
+            <EditForm Model="_editing" OnValidSubmit="SaveCompany" FormName="company-settings">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+                <div class="form-grid form-grid-three">
+                    <label><span>Name <span class="required-marker">*</span></span><InputText @bind-Value="_editing.Name" maxlength="200" /><ValidationMessage For="() => _editing.Name" /></label>
+                    <label><span>Company code <span class="required-marker">*</span></span><InputText @bind-Value="_editing.Code" maxlength="30" /><ValidationMessage For="() => _editing.Code" /></label>
+                    @if (_editing.Id is null) { <label><span>Base currency <span class="required-marker">*</span></span><InputText @bind-Value="_editing.BaseCurrencyCode" maxlength="3" /><small>Three-letter currency code, for example USD or KHR</small><ValidationMessage For="() => _editing.BaseCurrencyCode" /></label> }
+                    else { <label><span>Base currency</span><input value="@_editing.BaseCurrencyCode" disabled /><small>Manage currency settings separately</small></label> }
+                    <label><span>Time zone <span class="required-marker">*</span></span><InputText @bind-Value="_editing.TimeZoneId" maxlength="100" /><small>For example Asia/Phnom_Penh, America/Chicago, or UTC</small><ValidationMessage For="() => _editing.TimeZoneId" /></label>
+                    @if (_editing.Id is not null) { <label class="checkbox-field compact"><InputCheckbox @bind-Value="_editing.IsActive" /><span>Company is active</span></label> }
+                </div>
+                <div class="form-actions"><button type="submit" disabled="@_busy">@(_busy ? "Saving…" : "Save company")</button><button type="button" class="button-secondary" disabled="@_busy" @onclick="CancelEdit">Cancel</button></div>
+            </EditForm>
+        </section>
+    }
+
+    <section class="card company-list-section">
+        <div class="section-heading"><div><p class="eyebrow">Company directory</p><h2>Companies</h2></div><span class="muted">@_companies.Count total</span></div>
+        @if (_loading) { <div class="loading-state">Loading companies…</div> }
+        else if (_companies.Count == 0) { <div class="empty-state"><h2>No companies yet</h2><p>Create the first operating company for this organization.</p></div> }
+        else
+        {
+            <div class="table-scroll" tabindex="0"><table class="data-table company-table">
+                <thead><tr><th>Company</th><th>Base currency</th><th>Time zone</th><th>Members</th><th>Status</th>@if (_canManage) { <th><span class="visually-hidden">Actions</span></th> }</tr></thead>
+                <tbody>@foreach (var company in _companies) { <tr><td><strong>@company.Name</strong><br /><small class="muted">@company.Code @if (company.IsCurrent) { <span> · Current</span> }</small></td><td>@company.BaseCurrencyCode</td><td>@company.TimeZoneId</td><td>@company.MemberCount</td><td><span class="status-badge @(company.IsActive ? "is-success" : "is-neutral")">@(company.IsActive ? "Active" : "Inactive")</span></td>@if (_canManage) { <td class="row-action"><button type="button" class="button-secondary button-small" @onclick="() => BeginEdit(company)">Edit</button></td> }</tr> }</tbody>
+            </table></div>
+        }
+    </section>
+</div>
+
+@code {
+    private OrganizationContext? _organization;
+    private IReadOnlyList<CompanySummary> _companies = [];
+    private CompanyEditor? _editing;
+    private OrganizationEditor? _organizationEditor;
+    private Guid _userId;
+    private bool _canManage, _loading = true, _busy;
+    private string? _error, _message;
+    [SupplyParameterFromQuery] public bool Created { get; set; }
+    [SupplyParameterFromQuery] public bool Updated { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authentication = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        _canManage = authentication.User.HasClaim("permission", PlatformPermissions.OrganizationManage);
+        _message = Created ? "Company created. Choose it from the company switcher in the header." : Updated ? "Company settings saved." : null;
+        if (Guid.TryParse(authentication.User.FindFirstValue(ClaimTypes.NameIdentifier), out _userId)) await Load();
+        _loading = false;
+    }
+    private async Task Load() { _organization = await OrganizationReader.GetAsync(new UserId(_userId), CancellationToken.None); _companies = await Organizations.ListCompaniesAsync(_userId, CancellationToken.None, _canManage); }
+    private void BeginCreate() { _error = _message = null; _organizationEditor = null; _editing = new() { BaseCurrencyCode = _organization?.BaseCurrencyCode ?? "USD", TimeZoneId = _organization?.TimeZoneId ?? "Etc/UTC", IsActive = true }; }
+    private void BeginEdit(CompanySummary company) { _error = _message = null; _organizationEditor = null; _editing = new() { Id = company.Id, Name = company.Name, Code = company.Code, BaseCurrencyCode = company.BaseCurrencyCode, TimeZoneId = company.TimeZoneId, IsActive = company.IsActive, Version = company.Version }; }
+    private void BeginOrganizationEdit()
+    {
+        if (_organization is null) return;
+        _editing = null; _error = _message = null;
+        _organizationEditor = new() { Name = _organization.TenantName, TimeZoneId = _organization.TenantTimeZoneId, Version = _organization.TenantVersion };
+    }
+    private async Task SaveOrganization()
+    {
+        if (_organizationEditor is null || _busy) return;
+        _busy = true; _error = _message = null;
+        try
+        {
+            await Organizations.UpdateOrganizationAsync(new(_organizationEditor.Name, _organizationEditor.TimeZoneId, _organizationEditor.Version), CancellationToken.None);
+            _organizationEditor = null;
+            NavigationManager.NavigateTo("/organization?updated=true", forceLoad: true);
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException) { _error = exception.Message; }
+        finally { _busy = false; }
+    }
+    private void CancelEdit() => _editing = null;
+    private async Task SaveCompany()
+    {
+        if (_editing is null || _busy) return;
+        _busy = true; _error = _message = null;
+        try
+        {
+            var creating = _editing.Id is null;
+            if (creating) await Organizations.CreateCompanyAsync(_userId, new(_editing.Name, _editing.Code, _editing.BaseCurrencyCode, _editing.TimeZoneId), CancellationToken.None);
+            else await Organizations.UpdateCompanyAsync(_editing.Id!.Value, new(_editing.Name, _editing.Code, _editing.TimeZoneId, _editing.IsActive, _editing.Version), CancellationToken.None);
+            _editing = null;
+            NavigationManager.NavigateTo(creating ? "/organization?created=true" : "/organization?updated=true", forceLoad: true);
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException) { _error = exception.Message; }
+        finally { _busy = false; }
+    }
+    private sealed class CompanyEditor
+    {
+        public Guid? Id { get; set; }
+        public string? Version { get; set; }
+        [System.ComponentModel.DataAnnotations.Required, System.ComponentModel.DataAnnotations.StringLength(200)] public string Name { get; set; } = "";
+        [System.ComponentModel.DataAnnotations.Required, System.ComponentModel.DataAnnotations.StringLength(30)] public string Code { get; set; } = "";
+        [System.ComponentModel.DataAnnotations.Required, System.ComponentModel.DataAnnotations.RegularExpression("[A-Za-z]{3}", ErrorMessage = "Use a three-letter currency code.")] public string BaseCurrencyCode { get; set; } = "USD";
+        [System.ComponentModel.DataAnnotations.Required, System.ComponentModel.DataAnnotations.StringLength(100)] public string TimeZoneId { get; set; } = "Etc/UTC";
+        public bool IsActive { get; set; }
+    }
+    private sealed class OrganizationEditor
+    {
+        [System.ComponentModel.DataAnnotations.Required, System.ComponentModel.DataAnnotations.StringLength(200)] public string Name { get; set; } = "";
+        [System.ComponentModel.DataAnnotations.Required, System.ComponentModel.DataAnnotations.StringLength(100)] public string TimeZoneId { get; set; } = "UTC";
+        public string? Version { get; set; }
+    }
+}

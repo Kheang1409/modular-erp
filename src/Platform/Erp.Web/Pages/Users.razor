@@ -1,0 +1,244 @@
+@page "/administration/users"
+@attribute [Authorize(Policy = PlatformPermissions.SecurityManage)]
+@using System.ComponentModel.DataAnnotations
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject IRoleAdministrationService Roles
+@inject IUserAdministrationService UserAdministration
+@inject IOrganizationAdministrationService Organizations
+@inject NavigationManager Navigation
+
+<PageTitle>Users and access</PageTitle>
+
+<div class="entity-page">
+    <div class="page-heading">
+        <div><p class="eyebrow">Security administration</p><h1>Users and access</h1><p class="muted">Give people the roles and company access they need.</p></div>
+        <div class="heading-actions">
+            <a class="button button-secondary" href="/administration/roles">Manage roles</a>
+            <button type="button" disabled="@(_busy || _loading)" @onclick="StartCreate">New user</button>
+        </div>
+    </div>
+    @if (_error is not null) { <div class="notice notice-error" role="alert">@_error</div> }
+    @if (_message is not null) { <div class="notice notice-success" role="status">@_message</div> }
+    @if (_loading) { <div class="loading-state" role="status">Loading access settings...</div> }
+    else
+    {
+        <div class="access-grid">
+            <section class="card access-users" aria-label="User directory">
+                <div class="section-heading"><div><p class="eyebrow">Directory</p><h2>Users</h2></div><span class="muted">@_users.Count</span></div>
+                <label class="field"><span>Find a user</span><input type="search" @bind="_search" @bind:event="oninput" placeholder="Search by email" /></label>
+                @foreach (var user in FilteredUsers)
+                {
+                    <button type="button" class="access-user @(_selected?.UserId == user.UserId ? "is-selected" : null)" disabled="@_busy" aria-pressed="@(_selected?.UserId == user.UserId)" @onclick="() => Select(user)">
+                        <strong>@user.Email</strong>
+                        <span>@user.CompanyIds.Count @(user.CompanyIds.Count == 1 ? "company" : "companies") &middot; @user.RoleIds.Count role@(user.RoleIds.Count == 1 ? "" : "s") &middot; @Status(user)</span>
+                    </button>
+                }
+                @if (!FilteredUsers.Any()) { <p class="muted">No users match your search.</p> }
+            </section>
+            <section class="card access-editor" aria-label="User access editor">
+                @if (_creating || _selected is not null)
+                {
+                    <p class="eyebrow">@(_creating ? "Add someone" : "Access settings")</p>
+                    <h2>@(_creating ? "New user" : _selected!.Email)</h2>
+                    @if (!_creating)
+                    {
+                        <p class="muted">@Status(_selected!)@(_selected!.UserId == _currentUserId ? " · Your account" : "")</p>
+                    }
+                    <EditForm Model="_createModel" OnValidSubmit="Save" FormName="user-access">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary />
+                        <fieldset disabled="@_busy">
+                            @if (_creating)
+                            {
+                                <label class="field"><span>Email address</span><InputText type="email" @bind-Value="_createModel.Email" autocomplete="off" maxlength="254" /></label>
+                                <label class="field"><span>Initial password</span><InputText type="password" @bind-Value="_createModel.Password" autocomplete="new-password" minlength="12" maxlength="1024" /></label>
+                                <p class="field-help">Use at least 12 characters, including uppercase, lowercase, a number and a symbol. Share this password securely with the user.</p>
+                            }
+                            <fieldset><legend>Companies</legend>
+                                @foreach (var company in _companies.Where(x => x.IsActive || (!_creating && _companyIds.Contains(x.Id))))
+                                {
+                                    <label class="checkbox-field"><input type="checkbox" checked="@_companyIds.Contains(company.Id)" @onchange="args => ToggleCompany(company.Id, args.Value as bool? == true)" /><span><strong>@company.Name@(!company.IsActive ? " (inactive)" : "")</strong><small>@company.Code &middot; @company.BaseCurrencyCode</small></span></label>
+                                }
+                                <label class="field"><span>Default company</span><select value="@_defaultCompanyId" @onchange="ChangeDefault"><option value="">Select a company</option>@foreach (var company in _companies.Where(x => x.IsActive && _companyIds.Contains(x.Id))) { <option value="@company.Id">@company.Name</option> }</select></label>
+                                <p class="field-help">The default company opens after sign-in. Users can switch between their active companies.</p>
+                            </fieldset>
+                            <fieldset><legend>Roles</legend>
+                                @foreach (var role in _roles)
+                                {
+                                    <label class="checkbox-field"><input type="checkbox" checked="@_roleIds.Contains(role.Id)" @onchange="args => ToggleRole(role.Id, args.Value as bool? == true)" /><span><strong>@role.Name</strong><small>@role.Permissions.Count permission@(role.Permissions.Count == 1 ? "" : "s")</small></span></label>
+                                }
+                                <p class="field-help">Roles apply across the user's companies in this organization.</p>
+                            </fieldset>
+                            <div class="form-actions"><button type="submit">@(_busy ? "Saving..." : _creating ? "Create user" : "Save access")</button><button type="button" class="button-secondary" @onclick="Refresh">Refresh</button></div>
+                        </fieldset>
+                    </EditForm>
+                    @if (!_creating && _selected is not null)
+                    {
+                        <section class="access-account-actions" aria-label="Account controls">
+                            <h3>Account controls</h3>
+                            <p class="muted">Deactivating a user ends their access. Their work and audit history stay available.</p>
+                            <div class="form-actions">
+                                <button type="button" class="button-secondary" disabled="@(_busy || _selected.UserId == _currentUserId)" @onclick="ChangeActive">@(!_selected.IsActive ? "Activate user" : _selected.IsLockedOut ? "Unlock user" : "Deactivate user")</button>
+                            </div>
+                            <EditForm Model="_passwordModel" OnValidSubmit="ResetPassword" FormName="user-password">
+                                <DataAnnotationsValidator />
+                                <ValidationSummary />
+                                <fieldset disabled="@_busy">
+                                    <legend>Set a new password</legend>
+                                    <label class="field"><span>New password</span><InputText type="password" @bind-Value="_passwordModel.Password" autocomplete="new-password" minlength="12" maxlength="1024" /></label>
+                                    <p class="field-help">Use at least 12 characters with uppercase, lowercase, a number and a symbol. This signs the user out of existing sessions.</p>
+                                    <div class="form-actions"><button type="submit" class="button-secondary">Set password</button></div>
+                                </fieldset>
+                            </EditForm>
+                        </section>
+                    }
+                }
+                else { <div class="empty-state"><h2>Select a user</h2><p>Choose a user to review access, or create a new account.</p></div> }
+            </section>
+        </div>
+    }
+</div>
+
+@code {
+    private IReadOnlyList<TenantUserRoleSummary> _users = [];
+    private IReadOnlyList<RoleSummary> _roles = [];
+    private IReadOnlyList<CompanySummary> _companies = [];
+    private TenantUserRoleSummary? _selected;
+    private HashSet<Guid> _roleIds = [], _companyIds = [];
+    private Guid? _defaultCompanyId;
+    private Guid _currentUserId;
+    private CreateModel _createModel = new();
+    private PasswordModel _passwordModel = new();
+    private bool _loading = true, _busy, _creating;
+    private string? _error, _message;
+    private string _search = "";
+    private IEnumerable<TenantUserRoleSummary> FilteredUsers => _users.Where(x => x.Email.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var auth = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+            if (!Guid.TryParse(auth.User.FindFirstValue(ClaimTypes.NameIdentifier), out _currentUserId))
+                throw new InvalidOperationException("Sign in to manage user access.");
+            await Load();
+            if (_users.Count > 0) Select(_users[0]);
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException) { _error = exception.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task Load()
+    {
+        _roles = await Roles.ListAsync(CancellationToken.None);
+        _users = await Roles.ListUsersAsync(CancellationToken.None);
+        _companies = await Organizations.ListCompaniesAsync(_currentUserId, CancellationToken.None, includeAllCompanies: true);
+    }
+
+    private void Select(TenantUserRoleSummary user)
+    {
+        _selected = user; _creating = false; _roleIds = user.RoleIds.ToHashSet(); _companyIds = user.CompanyIds.ToHashSet();
+        _defaultCompanyId = user.DefaultCompanyId; _error = _message = null; _passwordModel = new(); _createModel = new();
+    }
+
+    private void StartCreate()
+    {
+        _selected = null; _creating = true; _roleIds = []; _companyIds = []; _defaultCompanyId = null;
+        _error = _message = null; _createModel = new(); _passwordModel = new();
+        var company = _companies.FirstOrDefault(x => x.IsCurrent && x.IsActive) ?? _companies.FirstOrDefault(x => x.IsActive);
+        if (company is not null) { _companyIds.Add(company.Id); _defaultCompanyId = company.Id; }
+    }
+
+    private void ToggleRole(Guid id, bool selected) { if (selected) _roleIds.Add(id); else _roleIds.Remove(id); }
+    private void ToggleCompany(Guid id, bool selected)
+    {
+        if (selected) { _companyIds.Add(id); _defaultCompanyId ??= id; }
+        else { _companyIds.Remove(id); if (_defaultCompanyId == id) _defaultCompanyId = _companies.FirstOrDefault(x => x.IsActive && _companyIds.Contains(x.Id))?.Id; }
+    }
+    private void ChangeDefault(ChangeEventArgs args) => _defaultCompanyId = Guid.TryParse(args.Value?.ToString(), out var id) ? id : null;
+    private static string Status(TenantUserRoleSummary user) => !user.IsActive ? "Inactive" : user.IsLockedOut ? "Temporarily locked" : "Active";
+
+    private async Task Save()
+    {
+        if (_busy) return;
+        _busy = true; _error = _message = null;
+        try
+        {
+            TenantUserRoleSummary? updated;
+            if (_creating)
+            {
+                if (_defaultCompanyId is not { } defaultId) throw new ArgumentException("Select a default company.");
+                updated = await UserAdministration.CreateAsync(new(_createModel.Email, _createModel.Password, _roleIds.ToArray(), _companyIds.ToArray(), defaultId), CancellationToken.None);
+                _createModel.Password = "";
+            }
+            else
+            {
+                if (_selected is null) return;
+                updated = await Roles.SetUserAccessAsync(_selected.UserId,
+                    new(_roleIds.ToArray(), _selected.RoleIds, _companyIds.ToArray(), _selected.CompanyIds, _defaultCompanyId, _selected.DefaultCompanyId), CancellationToken.None);
+            }
+            if (updated is null) throw new InvalidOperationException("This user is no longer available. Refresh the directory.");
+            var wasCreating = _creating;
+            var ownAccountChanged = !wasCreating && updated.UserId == _currentUserId && updated.ConcurrencyStamp != _selected?.ConcurrencyStamp;
+            await Load(); Select(_users.Single(x => x.UserId == updated.UserId));
+            _message = wasCreating ? "User created. Share their initial password securely." : "User access updated. They will sign in again to use the new access.";
+            if (ownAccountChanged) SignInAgain();
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException) { _error = exception.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task ChangeActive()
+    {
+        if (_selected is null || _busy) return;
+        _busy = true; _error = _message = null;
+        try
+        {
+            var updated = await UserAdministration.SetActiveAsync(_selected.UserId, new(!_selected.IsActive || _selected.IsLockedOut, _selected.ConcurrencyStamp), CancellationToken.None);
+            if (updated is null) throw new InvalidOperationException("This user is no longer available. Refresh the directory.");
+            await Load(); Select(_users.Single(x => x.UserId == updated.UserId));
+            _message = updated.IsActive ? "User activated and unlocked." : "User deactivated. Existing sessions are revoked.";
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException) { _error = exception.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task ResetPassword()
+    {
+        if (_selected is null || _busy) return;
+        _busy = true; _error = _message = null;
+        try
+        {
+            var updated = await UserAdministration.ResetPasswordAsync(_selected.UserId, new(_passwordModel.Password, _selected.ConcurrencyStamp), CancellationToken.None);
+            _passwordModel.Password = "";
+            if (updated is null) throw new InvalidOperationException("This user is no longer available. Refresh the directory.");
+            await Load(); Select(_users.Single(x => x.UserId == updated.UserId));
+            _message = "Password changed. Share the new password securely with the user.";
+            if (updated.UserId == _currentUserId) SignInAgain();
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException) { _error = exception.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task Refresh()
+    {
+        if (_busy) return;
+        _busy = true; _error = _message = null;
+        try { var selectedId = _selected?.UserId; await Load(); var user = _users.FirstOrDefault(x => x.UserId == selectedId); if (user is not null) Select(user); else if (_creating) StartCreate(); }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException) { _error = exception.Message; }
+        finally { _busy = false; }
+    }
+
+    private void SignInAgain() => Navigation.NavigateTo("/account/login?returnUrl=%2Fadministration%2Fusers", forceLoad: true);
+
+    private sealed class CreateModel
+    {
+        public string Email { get; set; } = "";
+        public string Password { get; set; } = "";
+    }
+    private sealed class PasswordModel
+    {
+        [Required, StringLength(1024, MinimumLength = 12)]
+        public string Password { get; set; } = "";
+    }
+}

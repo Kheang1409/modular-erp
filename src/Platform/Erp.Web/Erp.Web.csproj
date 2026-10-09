@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.Web.LibraryManager.Build" Version="3.0.71" PrivateAssets="all" />
+    <ProjectReference Include="..\Erp.Abstractions\Erp.Abstractions.csproj" />
+  </ItemGroup>
+
+  <Target Name="IncludeClientLibraryAssets" BeforeTargets="ResolveProjectStaticWebAssets" DependsOnTargets="LibraryManagerRestore">
+    <ItemGroup>
+      <Content Include="wwwroot/vendor/bootstrap/**/*" Exclude="@(Content)" />
+    </ItemGroup>
+  </Target>
+
+</Project>

@@ -1,0 +1,76 @@
+@page "/administration/queues"
+@attribute [Authorize(Policy = PlatformPermissions.OperationsManage)]
+@inject HttpClient Http
+
+<PageTitle>Queue recovery</PageTitle>
+
+<article class="card contacts-card">
+    <p class="eyebrow">Operations</p>
+    <h1>Queue recovery</h1>
+    <p class="muted">Review the root cause before replaying work. Consumers must be idempotent because delivery is at least once.</p>
+    @if (_message is not null) { <div class="notice @(_failed ? "notice-error" : "notice-success")" role="status">@_message</div> }
+    <div class="section-heading"><div><p class="eyebrow">Company scoped</p><h2>Dead letters</h2></div><button type="button" class="button-secondary" @onclick="Load">Refresh</button></div>
+
+    @if (_snapshot is null)
+    {
+        <p class="muted">Loading queue status…</p>
+    }
+    else
+    {
+        <p class="muted">Snapshot generated @_snapshot.GeneratedAtUtc.ToLocalTime().ToString("g"). Payloads are intentionally excluded.</p>
+        <section class="line-section">
+            <h2>Integration outbox</h2>
+            @if (_snapshot.Outbox.Count == 0) { <p class="muted">No dead-letter outbox messages.</p> }
+            else
+            {
+                <div class="table-scroll" tabindex="0"><table><thead><tr><th>Event</th><th>Retries</th><th>Occurred</th><th>Action</th></tr></thead><tbody>
+                @foreach (var item in _snapshot.Outbox)
+                {
+                    <tr><td><strong>@item.EventType</strong><br /><small class="muted">@item.CorrelationId</small></td><td>@item.RetryCount</td><td>@item.OccurredAtUtc.ToLocalTime().ToString("g")</td><td><button type="button" class="button-secondary" disabled="@_busy" @onclick="() => ReplayOutbox(item.Id)">Replay</button></td></tr>
+                }
+                </tbody></table></div>
+            }
+        </section>
+        <section class="line-section">
+            <h2>Background jobs</h2>
+            @if (_snapshot.Jobs.Count == 0) { <p class="muted">No dead-letter background jobs.</p> }
+            else
+            {
+                <div class="table-scroll" tabindex="0"><table><thead><tr><th>Job</th><th>Attempts</th><th>Created</th><th>Action</th></tr></thead><tbody>
+                @foreach (var item in _snapshot.Jobs)
+                {
+                    <tr><td><strong>@item.Name</strong><br /><small class="muted">@item.CorrelationId</small></td><td>@item.Attempts / @item.MaxAttempts</td><td>@item.CreatedAtUtc.ToLocalTime().ToString("g")</td><td><button type="button" class="button-secondary" disabled="@_busy" @onclick="() => ReplayJob(item.Id)">Replay</button></td></tr>
+                }
+                </tbody></table></div>
+            }
+        </section>
+    }
+</article>
+
+@code {
+    private QueueOperationsSnapshot? _snapshot;
+    private string? _message;
+    private bool _failed;
+    private bool _busy;
+    protected override Task OnInitializedAsync() => Load();
+    private async Task Load()
+    {
+        try { _snapshot = await Http.GetFromJsonAsync<QueueOperationsSnapshot>("api/v1/platform/operations/dead-letters?limit=100"); }
+        catch (Exception exception) { Error(exception.Message); }
+    }
+    private Task ReplayOutbox(Guid id) => Replay($"api/v1/platform/operations/outbox/{id}/replay", "Outbox message queued for replay.");
+    private Task ReplayJob(Guid id) => Replay($"api/v1/platform/operations/jobs/{id}/replay", "Background job queued for replay.");
+    private async Task Replay(string path, string success)
+    {
+        _busy = true;
+        try
+        {
+            using var response = await Http.PostAsync(path, null);
+            if (!response.IsSuccessStatusCode) throw new InvalidOperationException(response.StatusCode == System.Net.HttpStatusCode.NotFound ? "The dead letter is no longer available." : "Replay failed.");
+            _message = success; _failed = false; await Load();
+        }
+        catch (Exception exception) { Error(exception.Message); }
+        finally { _busy = false; }
+    }
+    private void Error(string value) { _message = value; _failed = true; }
+}

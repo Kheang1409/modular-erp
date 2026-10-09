@@ -1,0 +1,27 @@
+@inject IModuleRegistry ModuleRegistry
+
+<CascadingAuthenticationState>
+    <Router AppAssembly="typeof(App).Assembly" AdditionalAssemblies="ModuleAssemblies">
+        <Found Context="routeData">
+            <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
+                <NotAuthorized>
+                    <LayoutView Layout="typeof(Layout.MainLayout)">
+                        <article class="card">
+                            <h1>Access required</h1>
+                            <p>You must sign in with the required permission to view this page.</p>
+                            <a class="button" href="/account/login">Sign in</a>
+                        </article>
+                    </LayoutView>
+                </NotAuthorized>
+            </AuthorizeRouteView>
+            <FocusOnNavigate RouteData="routeData" Selector="h1" />
+        </Found>
+        <NotFound>
+            <LayoutView Layout="typeof(Layout.MainLayout)"><h1>Page not found</h1></LayoutView>
+        </NotFound>
+    </Router>
+</CascadingAuthenticationState>
+
+@code {
+    private IEnumerable<Assembly> ModuleAssemblies => ModuleRegistry.Modules.Select(module => module.ComponentAssembly);
+}

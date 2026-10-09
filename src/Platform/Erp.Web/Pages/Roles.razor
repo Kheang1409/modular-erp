@@ -1,0 +1,99 @@
+@page "/administration/roles"
+@attribute [Authorize(Policy = PlatformPermissions.SecurityManage)]
+@inject IRoleAdministrationService RolesService
+@inject IPermissionRegistry Permissions
+@inject AuthenticationStateProvider Authentication
+@inject NavigationManager Navigation
+
+<PageTitle>Roles and permissions</PageTitle>
+
+<div class="entity-page">
+    <div class="page-heading">
+        <div><p class="eyebrow">Security administration</p><h1>Roles and permissions</h1><p class="muted">Create reusable access profiles, then assign them from Users and access.</p></div>
+        <div class="heading-actions"><a class="button button-secondary" href="/administration/users">Users and access</a><button type="button" disabled="@_busy" @onclick="BeginCreate">Add role</button></div>
+    </div>
+    @if (_error is not null) { <div class="notice notice-error" role="alert">@_error</div> }
+    @if (_message is not null) { <div class="notice notice-success" role="status">@_message</div> }
+    <div class="access-grid">
+        <section class="card access-users" aria-label="Organization roles">
+            <div class="section-heading"><h2>Roles</h2><span class="muted">@_roles.Count</span></div>
+            @foreach (var role in _roles)
+            {
+                <button type="button" class="access-user @(_selected?.Id == role.Id ? "is-selected" : null)" disabled="@_busy" @onclick="() => Select(role)"><strong>@role.Name</strong><span>@role.Permissions.Count permissions @(role.IsSystem ? " · System role" : "")</span></button>
+            }
+        </section>
+        <section class="card access-editor">
+            <p class="eyebrow">@(_selected is null ? "New access profile" : "Access profile")</p>
+            <h2>@(_selected?.Name ?? "Create a role")</h2>
+            @if (_selected is null)
+            {
+                <label for="role-name"><span>Role name</span><input id="role-name" maxlength="100" @bind="_name" disabled="@_busy" /><small>For example Sales team or Inventory reader</small></label>
+            }
+            @if (_selected?.IsSystem == true)
+            {
+                <p class="muted">The system administrator profile receives all application permissions at startup. Create a separate role to define specific access.</p>
+            }
+            @foreach (var group in Permissions.Permissions.OrderBy(x => x.ModuleId).ThenBy(x => x.DisplayName).GroupBy(x => x.ModuleId))
+            {
+                <fieldset><legend>@ModuleName(group.Key)</legend>
+                    @foreach (var permission in group)
+                    {
+                        <label class="checkbox-field"><input type="checkbox" checked="@_permissions.Contains(permission.Name)" disabled="@(_busy || _selected?.IsSystem == true)" @onchange="args => Toggle(permission.Name, args.Value is true)" /><span>@permission.DisplayName</span></label>
+                    }
+                </fieldset>
+            }
+            @if (_selected?.IsSystem != true)
+            {
+                <div class="form-actions"><button type="button" disabled="@_busy" @onclick="Save">@(_busy ? "Saving..." : "Save role")</button></div>
+            }
+        </section>
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<RoleSummary> _roles = [];
+    private RoleSummary? _selected;
+    private HashSet<string> _permissions = new(StringComparer.Ordinal);
+    private string _name = "";
+    private string? _error, _message;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _roles = await RolesService.ListAsync(CancellationToken.None);
+        if (_roles.Count > 0) Select(_roles[0]);
+    }
+
+    private void BeginCreate() { _selected = null; _name = ""; _permissions.Clear(); _error = _message = null; }
+    private void Select(RoleSummary role) { _selected = role; _name = role.Name; _permissions = role.Permissions.ToHashSet(StringComparer.Ordinal); _error = _message = null; }
+    private void Toggle(string name, bool selected) { if (selected) _permissions.Add(name); else _permissions.Remove(name); }
+    private static string ModuleName(string id) => id switch
+    {
+        "erp.platform" => "Administration", "erp.contacts" => "Contacts", "erp.products" => "Products",
+        "erp.crm" => "CRM", "erp.sales" => "Sales", "erp.purchasing" => "Purchasing",
+        "erp.inventory" => "Inventory", "erp.accounting" => "Accounting", "erp.reporting" => "Reporting",
+        _ => id.Split('.').Last()
+    };
+
+    private async Task Save()
+    {
+        if (_busy || _selected?.IsSystem == true) return;
+        _busy = true; _error = _message = null;
+        try
+        {
+            var auth = await Authentication.GetAuthenticationStateAsync();
+            var affectsOwnAccess = false;
+            if (_selected is not null && Guid.TryParse(auth.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))
+                affectsOwnAccess = (await RolesService.ListUsersAsync(CancellationToken.None)).Any(user => user.UserId == userId && user.RoleIds.Contains(_selected.Id));
+            var role = _selected is null
+                ? await RolesService.CreateAsync(new(_name, _permissions.ToArray()), CancellationToken.None)
+                : await RolesService.SetPermissionsAsync(_selected.Id, new(_permissions.ToArray(), _selected.ConcurrencyStamp), CancellationToken.None);
+            if (role is null) throw new InvalidOperationException("This role is no longer available. Refresh the page.");
+            _roles = await RolesService.ListAsync(CancellationToken.None); Select(role);
+            _message = $"{role.Name} was saved. Assign it from Users and access.";
+            if (affectsOwnAccess) Navigation.NavigateTo("/account/login", forceLoad: true);
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException) { _error = exception.Message; }
+        finally { _busy = false; }
+    }
+}

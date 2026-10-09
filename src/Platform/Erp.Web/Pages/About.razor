@@ -1,0 +1,15 @@
+@page "/about"
+@attribute [Authorize]
+
+<PageTitle>About Open ERP</PageTitle>
+
+<div class="entity-page">
+    <div class="page-heading"><div><p class="eyebrow">Open ERP</p><h1>About this application</h1><p class="muted">A modular business operations platform designed for clear workflows and company-level data isolation.</p></div></div>
+    <section class="card">
+        <dl class="details"><dt>Application</dt><dd>Open ERP</dd><dt>Version</dt><dd>@(typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "Development")</dd><dt>Workspace</dt><dd>One organization with multiple companies</dd></dl>
+        <div class="detail-grid">
+            <div class="detail-panel"><p class="eyebrow">Architecture</p><h2>Modular by design</h2><p>Feature projects contain implementation; <code>*.Contracts</code> projects are their stable integration boundaries. They are complementary, not duplicate user-facing modules.</p></div>
+            <div class="detail-panel"><p class="eyebrow">License</p><h2>Apache License 2.0</h2><p>You may use, modify, and distribute this software under the repository's Apache-2.0 license terms.</p></div>
+        </div>
+    </section>
+</div>

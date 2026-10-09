@@ -1,0 +1,174 @@
+@inherits LayoutComponentBase
+@inject INavigationRegistry Navigation
+@inject NavigationManager NavigationManager
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject IServiceScopeFactory ScopeFactory
+
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<div class="shell @(_menuOpen ? "menu-open" : null)" data-interactive="@_interactive.ToString().ToLowerInvariant()" @onkeydown="HandleNavigationKey">
+    <aside id="primary-sidebar" aria-label="Application navigation">
+        <button class="sidebar-close" type="button" aria-label="Close navigation" @ref="_closeNavigationButton" @onclick="CloseMenu"><span>Close</span><span aria-hidden="true">&#215;</span></button>
+        <a class="brand" href="/">
+            <span class="brand-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M4 19V9.5L12 4l8 5.5V19h-5v-5h-6v5H4Z" /><path d="M8 10h.01M16 10h.01" /></svg>
+            </span>
+            <span>Open ERP<small>Business workspace</small></span>
+        </a>
+        <nav aria-label="Primary navigation">
+            <NavLink class="overview-link" href="/" Match="NavLinkMatch.All" @onclick="CloseMenu">
+                <span class="nav-symbol" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false"><path d="m3 10 9-7 9 7v10h-6v-6H9v6H3V10Z" /></svg>
+                </span>
+                <span>Workspace overview</span>
+            </NavLink>
+            <AuthorizeView>
+                <Authorized Context="auth">
+                    @foreach (var group in VisibleGroups(auth.User))
+                    {
+                        <details class="nav-group" open="@IsGroupActive(group)">
+                            <summary><span>@group.Key</span><span class="nav-chevron" aria-hidden="true">&#8964;</span></summary>
+                            <div class="nav-children">
+                                @foreach (var item in group)
+                                {
+                                    <NavLink href="@item.Href" @onclick="CloseMenu">
+                                        <span class="nav-item-icon" aria-hidden="true">@((MarkupString)NavigationIcon(item.Href))</span>
+                                        <span>@item.Text</span>
+                                    </NavLink>
+                                }
+                            </div>
+                        </details>
+                    }
+                </Authorized>
+            </AuthorizeView>
+        </nav>
+    </aside>
+    @if (_menuOpen)
+    {
+        <button class="sidebar-scrim" type="button" aria-label="Close navigation" @onclick="CloseMenu"></button>
+    }
+    <div class="content">
+        <header class="workspace-header">
+            <button class="menu-toggle" type="button" aria-controls="primary-sidebar" aria-expanded="@_menuOpen.ToString().ToLowerInvariant()" @ref="_menuToggle" @onclick="ToggleMenu"><span aria-hidden="true">&#9776;</span><span>Menu</span></button>
+            <div class="workspace-context"><span>Workspace <span class="context-divider" aria-hidden="true">/</span> @CurrentSection</span><strong>@CurrentPage</strong></div>
+            <div class="header-spacer"></div>
+            <AuthorizeView>
+                <Authorized Context="auth">
+                    @if (AvailableCompanies.Count > 1)
+                    {
+                        <form method="post" action="/account/company/switch" class="company-switcher">
+                            <AntiforgeryToken />
+                            <input type="hidden" name="returnUrl" value="@RelativeUrl" />
+                            <label><span class="visually-hidden">Active company</span>
+                                <select name="companyId" aria-label="Active company">
+                                    @foreach (var company in AvailableCompanies)
+                                    {
+                                        <option value="@company.Id" selected="@company.IsCurrent">@company.Name</option>
+                                    }
+                                </select>
+                            </label>
+                            <button type="submit" class="button-secondary button-small">Switch</button>
+                        </form>
+                    }
+                    else if (_companies.FirstOrDefault(company => company.IsCurrent) is { } company)
+                    {
+                        <span class="company-label">@company.Name</span>
+                    }
+                    <span class="user-badge" title="@auth.User.Identity?.Name"><span class="user-avatar" aria-hidden="true">@UserInitial(auth.User)</span><span>@auth.User.Identity?.Name</span></span>
+                    <form method="post" action="/account/logout" class="session-action"><AntiforgeryToken /><button type="submit" class="button-secondary">Log out</button></form>
+                </Authorized>
+                <NotAuthorized><a class="button button-secondary" href="/account/login">Log in</a></NotAuthorized>
+            </AuthorizeView>
+        </header>
+        <main id="main-content" tabindex="-1">
+            <ErrorBoundary @ref="_errorBoundary">
+                <ChildContent>@Body</ChildContent>
+                <ErrorContent Context="error">
+                    <article class="card error-panel" role="alert">
+                        <p class="eyebrow">Something went wrong</p>
+                        <h1>We couldn't load this workspace</h1>
+                        <p>The request failed safely. Retry the page, or return to the overview if the problem continues.</p>
+                        <p class="error-reference">Reference: @error.GetType().Name</p>
+                        <button type="button" @onclick="Retry">Try again</button> <a class="button button-secondary" href="/">Overview</a>
+                    </article>
+                </ErrorContent>
+            </ErrorBoundary>
+        </main>
+    </div>
+</div>
+
+@code {
+    private ErrorBoundary? _errorBoundary;
+    private bool _menuOpen;
+    private bool _interactive;
+    private bool _focusCloseControl;
+    private ElementReference _menuToggle, _closeNavigationButton;
+    private IReadOnlyList<CompanySummary> _companies = [];
+    private IReadOnlyList<CompanySummary> AvailableCompanies => _companies.Where(company => company.IsMember && company.IsActive).ToArray();
+    private string RelativeUrl => "/" + NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+    private NavigationItem? CurrentItem => Navigation.Items
+        .Where(item => RelativeUrl.Equals(item.Href, StringComparison.OrdinalIgnoreCase)
+            || RelativeUrl.StartsWith(item.Href + "/", StringComparison.OrdinalIgnoreCase)
+            || RelativeUrl.StartsWith(item.Href + "?", StringComparison.OrdinalIgnoreCase))
+        .OrderByDescending(item => item.Href.Length).FirstOrDefault();
+    private string CurrentSection => CurrentItem?.Group ?? "Overview";
+    private string CurrentPage => CurrentItem?.Text ?? (RelativeUrl.StartsWith("/account", StringComparison.OrdinalIgnoreCase) ? "Account" : "Open ERP");
+    private static string UserInitial(System.Security.Claims.ClaimsPrincipal user) =>
+        (user.Identity?.Name?.FirstOrDefault() ?? 'U').ToString().ToUpperInvariant();
+    private static readonly string[] ReportPermissions = ["reporting.sales", "reporting.purchasing", "reporting.inventory", "reporting.financial", "reporting.receivables", "reporting.payables", "reporting.cash"];
+    private static bool CanViewReports(System.Security.Claims.ClaimsPrincipal user) => ReportPermissions.Any(permission => user.HasClaim("permission", permission));
+    private IEnumerable<NavigationItem> VisibleItems(System.Security.Claims.ClaimsPrincipal user) =>
+        Navigation.Items.Where(item => item.RequiredPermission is null
+            || (item.RequiredPermission == "reporting.dashboard" ? CanViewReports(user) : user.HasClaim("permission", item.RequiredPermission)));
+    private IEnumerable<IGrouping<string, NavigationItem>> VisibleGroups(System.Security.Claims.ClaimsPrincipal user) =>
+        VisibleItems(user).GroupBy(item => item.Group);
+    private static string NavigationIcon(string href)
+    {
+        var path = href switch
+        {
+            var value when value.StartsWith("/contacts", StringComparison.OrdinalIgnoreCase) => "<circle cx=\"12\" cy=\"8\" r=\"3.5\"/><path d=\"M5 20a7 7 0 0 1 14 0\"/>",
+            var value when value.StartsWith("/crm", StringComparison.OrdinalIgnoreCase) => "<path d=\"M4 19V5m0 14h16\"/><path d=\"m7 15 4-4 3 2 5-6\"/>",
+            var value when value.StartsWith("/sales", StringComparison.OrdinalIgnoreCase) => "<path d=\"M6 3h9l4 4v14H6z\"/><path d=\"M14 3v5h5M9 13h7m-7 4h7\"/>",
+            var value when value.StartsWith("/purchasing", StringComparison.OrdinalIgnoreCase) => "<path d=\"M3 4h2l2.2 11h10.9L21 8H6\"/><circle cx=\"9\" cy=\"19\" r=\"1.2\"/><circle cx=\"17\" cy=\"19\" r=\"1.2\"/>",
+            var value when value.StartsWith("/inventory", StringComparison.OrdinalIgnoreCase) => "<path d=\"m12 3 9 5-9 5-9-5 9-5Z\"/><path d=\"m3 8 9 5 9-5M3 13l9 5 9-5M3 8v8l9 5 9-5V8\"/>",
+            var value when value.StartsWith("/accounting", StringComparison.OrdinalIgnoreCase) => "<circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M15.5 8.5c-.8-.8-1.8-1.2-3.1-1.2-1.6 0-2.7.8-2.7 2s1 1.8 2.8 2.2 2.9 1 2.9 2.3-1.2 2.4-3 2.4c-1.4 0-2.6-.5-3.5-1.5M12 5.5v13\"/>",
+            var value when value.StartsWith("/reports", StringComparison.OrdinalIgnoreCase) => "<path d=\"M4 19V5m0 14h16\"/><path d=\"M8 15v-4m4 4V7m4 8v-6m4 6V4\"/>",
+            var value when value.StartsWith("/administration", StringComparison.OrdinalIgnoreCase) => "<path d=\"M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z\"/><path d=\"m19.4 15 .1.1 1.4 1.1-1.4 2.4-1.7-.7a8 8 0 0 1-1.6.9l-.3 1.8h-2.8l-.3-1.8a8 8 0 0 1-1.6-.9l-1.7.7-1.4-2.4 1.4-1.1a7 7 0 0 1 0-1.9l-1.4-1.1 1.4-2.4 1.7.7a8 8 0 0 1 1.6-.9l.3-1.8h2.8l.3 1.8a8 8 0 0 1 1.6.9l1.7-.7 1.4 2.4-1.4 1.1a7 7 0 0 1 0 1.9Z\"/>",
+            _ => "<path d=\"M4 5h16v14H4z\"/><path d=\"M8 9h8m-8 4h8m-8 4h5\"/>"
+        };
+        return $"<svg viewBox=\"0 0 24 24\" focusable=\"false\">{path}</svg>";
+    }
+    private bool IsGroupActive(IGrouping<string, NavigationItem> group) =>
+        group.Any(item => NavigationManager.Uri.Contains(item.Href, StringComparison.OrdinalIgnoreCase));
+    private void ToggleMenu() { _menuOpen = !_menuOpen; _focusCloseControl = _menuOpen; }
+    private async Task CloseMenu()
+    {
+        if (!_menuOpen) return;
+        _menuOpen = false; _focusCloseControl = false;
+        await _menuToggle.FocusAsync(preventScroll: true);
+    }
+    private Task HandleNavigationKey(KeyboardEventArgs args) => args.Key == "Escape" ? CloseMenu() : Task.CompletedTask;
+    private void Retry() { _errorBoundary?.Recover(); NavigationManager.Refresh(forceReload: true); }
+    protected override async Task OnInitializedAsync()
+    {
+        var authentication = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        if (Guid.TryParse(authentication.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))
+        {
+            try
+            {
+                await using var scope = ScopeFactory.CreateAsyncScope();
+                _companies = await scope.ServiceProvider.GetRequiredService<IOrganizationAdministrationService>()
+                    .ListCompaniesAsync(userId, CancellationToken.None);
+            }
+            catch (InvalidOperationException) { _companies = []; }
+        }
+    }
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender) { _interactive = true; StateHasChanged(); }
+        if (_menuOpen && _focusCloseControl)
+        {
+            _focusCloseControl = false;
+            await _closeNavigationButton.FocusAsync();
+        }
+    }
+}

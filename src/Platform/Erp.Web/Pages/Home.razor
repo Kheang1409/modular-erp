@@ -1,0 +1,111 @@
+@page "/"
+@inject IModuleRegistry ModuleRegistry
+@inject INavigationRegistry NavigationRegistry
+
+<PageTitle>Workspace overview</PageTitle>
+
+<AuthorizeView>
+    <Authorized Context="auth">
+        <div class="workspace-overview">
+            <div class="page-heading overview-heading">
+                <div><p class="eyebrow">Your workspace</p><h1>Good to have you here.</h1><p class="muted">A clear starting point for your company's daily operations.</p></div>
+                <div class="heading-actions">
+                    @if (CanReport(auth.User))
+                    {
+                        <a class="button" href="/reports/dashboard"><span aria-hidden="true">@((MarkupString)Icon("Reports"))</span>View dashboard</a>
+                    }
+                    <a class="button button-secondary" href="/help">Getting started</a>
+                </div>
+            </div>
+
+            <section class="workspace-summary row g-3" aria-label="Workspace foundation">
+                <div class="col-12 col-md-4"><article class="summary-tile"><span class="summary-icon" aria-hidden="true">@((MarkupString)Icon("Modules"))</span><div><span>Loaded modules</span><strong>@ModuleRegistry.Modules.Count business capabilities</strong></div></article></div>
+                <div class="col-12 col-md-4"><article class="summary-tile"><span class="summary-icon" aria-hidden="true">@((MarkupString)Icon("Organization"))</span><div><span>Company workspace</span><strong>One organization, multiple companies</strong></div></article></div>
+                <div class="col-12 col-md-4"><article class="summary-tile"><span class="summary-icon" aria-hidden="true">@((MarkupString)Icon("Security"))</span><div><span>Data and access</span><strong>Company-scoped and role-aware</strong></div></article></div>
+            </section>
+
+            @if (QuickActions(auth.User).Any())
+            {
+                <section class="overview-section" aria-labelledby="quick-actions-heading">
+                    <div class="section-heading"><div><h2 id="quick-actions-heading">Start something new</h2><p class="muted">Shortcuts to the work you can create.</p></div></div>
+                    <div class="quick-action-grid">
+                        @foreach (var action in QuickActions(auth.User))
+                        {
+                            <a class="quick-action" href="@action.Href"><span class="quick-action-icon" aria-hidden="true">+</span><span>@action.Text</span><span class="link-arrow" aria-hidden="true">&#8599;</span></a>
+                        }
+                    </div>
+                </section>
+            }
+
+            <section class="overview-section" aria-labelledby="workspace-areas-heading">
+                <div class="section-heading"><div><h2 id="workspace-areas-heading">Workspaces</h2><p class="muted">Your available business areas, organized around the way you work.</p></div></div>
+                <div class="row g-3 workspace-area-grid">
+                    @foreach (var area in WorkspaceAreas(auth.User))
+                    {
+                        <div class="col-12 col-md-6 col-xl-4"><a class="workspace-area" href="@area.Href"><span class="area-icon" aria-hidden="true">@((MarkupString)Icon(area.Group))</span><div><h3>@area.Group</h3><p>@AreaDescription(area.Group)</p><span class="area-link">Open workspace <span aria-hidden="true">&#8594;</span></span></div></a></div>
+                    }
+                </div>
+                @if (!WorkspaceAreas(auth.User).Any())
+                {
+                    <div class="empty-state"><h3>Your workspace is ready</h3><p>Ask an administrator to assign the business permissions you need.</p><a class="button button-secondary" href="/help">Read the guide</a></div>
+                }
+            </section>
+
+            <section class="overview-support row g-3" aria-label="Workspace support">
+                @if (auth.User.HasClaim("permission", PlatformPermissions.OrganizationRead) || auth.User.HasClaim("permission", PlatformPermissions.SecurityManage))
+                {
+                    <div class="col-12 col-lg-6"><article class="support-card"><span class="area-icon" aria-hidden="true">@((MarkupString)Icon("Organization"))</span><div><h3>Keep your workspace organized</h3><p>Manage operating companies and the people who can access them.</p><div class="support-links">@if (auth.User.HasClaim("permission", PlatformPermissions.OrganizationRead)) { <a href="/organization">Organization and companies</a> }@if (auth.User.HasClaim("permission", PlatformPermissions.SecurityManage)) { <a href="/administration/users">Users and access</a> }</div></div></article></div>
+                }
+                <div class="col-12 col-lg"><article class="support-card"><span class="area-icon" aria-hidden="true">@((MarkupString)Icon("Help"))</span><div><h3>A little guidance, when you need it</h3><p>Understand the setup and how sales, purchasing, inventory, and accounting connect.</p><div class="support-links"><a href="/help">Explore the workflow guide</a><a href="/about">About Open ERP</a></div></div></article></div>
+            </section>
+        </div>
+    </Authorized>
+    <NotAuthorized>
+        <article class="card welcome-card"><span class="welcome-mark" aria-hidden="true">@((MarkupString)Icon("Organization"))</span><p class="eyebrow">Open ERP</p><h1>Your business, connected.</h1><p class="muted">Sign in to your company workspace to manage daily operations and explore your reports.</p><a class="button" href="/account/login">Log in to your workspace</a></article>
+    </NotAuthorized>
+</AuthorizeView>
+
+@code {
+    private static readonly string[] ReportingPermissions = ["reporting.sales", "reporting.purchasing", "reporting.inventory", "reporting.financial", "reporting.receivables", "reporting.payables", "reporting.cash"];
+    private static bool CanReport(ClaimsPrincipal user) => ReportingPermissions.Any(permission => user.HasClaim("permission", permission));
+    private static readonly (string Text, string Href, string Permission)[] Actions =
+    [
+        ("New lead", "/crm/leads/new", "crm.manage"),
+        ("New quotation", "/sales/quotations/new", "sales.quotation.manage"),
+        ("New purchase order", "/purchasing/orders/new", "purchasing.order.manage"),
+        ("New product", "/products/new", "products.manage"),
+        ("New contact", "/contacts/new", "contacts.manage")
+    ];
+    private static IEnumerable<(string Text, string Href, string Permission)> QuickActions(ClaimsPrincipal user) => Actions.Where(action => user.HasClaim("permission", action.Permission));
+    private IEnumerable<NavigationItem> WorkspaceAreas(ClaimsPrincipal user) => NavigationRegistry.Items
+        .Where(item => item.Group is not "Help" and not "Administration" && (item.RequiredPermission is null
+            || (item.RequiredPermission == "reporting.dashboard" ? CanReport(user) : user.HasClaim("permission", item.RequiredPermission))))
+        .GroupBy(item => item.Group).Select(group => group.First());
+    private static string AreaDescription(string group) => group switch
+    {
+        "Master data" => "The products, services, customers, and suppliers your business relies on.",
+        "CRM" => "Bring leads, customer relationships, and opportunities into focus.",
+        "Sales" => "Move from customer quotations to confirmed sales orders.",
+        "Purchasing" => "Plan supplier orders and keep purchasing decisions organized.",
+        "Inventory" => "Stay in control of stock, locations, movements, and availability.",
+        "Accounting" => "Manage invoices, payments, journals, and financial controls.",
+        "Reports" => "Explore company performance with clear operational and financial reports.",
+        _ => "Access the tools and records available in this business area."
+    };
+    private static string Icon(string area)
+    {
+        var path = area switch
+        {
+            "Sales" => "<path d='M6 3h9l4 4v14H6z'/><path d='M14 3v5h5M9 13h7m-7 4h7'/>",
+            "Purchasing" => "<path d='M3 4h2l2.2 11h10.9L21 8H6'/><circle cx='9' cy='19' r='1.2'/><circle cx='17' cy='19' r='1.2'/>",
+            "Inventory" or "Master data" => "<path d='m12 3 9 5-9 5-9-5 9-5Z'/><path d='m3 8 9 5 9-5M3 8v8l9 5 9-5V8M12 13v8'/>",
+            "Reports" or "CRM" => "<path d='M4 19V5m0 14h16'/><path d='m7 15 4-4 3 2 5-6'/>",
+            "Organization" => "<path d='M4 20V8l8-5 8 5v12H4Z'/><path d='M9 20v-6h6v6M8 9h.01M16 9h.01'/>",
+            "Security" => "<path d='m12 3 8 3v6c0 4-3 7-8 9-5-2-8-5-8-9V6l8-3Z'/><path d='m8 12 3 3 5-6'/>",
+            "Help" => "<circle cx='12' cy='12' r='9'/><path d='M9.5 9a2.5 2.5 0 0 1 5 0c0 2-2.5 2-2.5 4M12 16h.01'/>",
+            "Accounting" => "<rect x='5' y='3' width='14' height='18' rx='2'/><path d='M8 7h8M8 11h2m4 0h2M8 15h2m4 0h2M8 18h2m4 0h2'/>",
+            _ => "<rect x='3' y='3' width='7' height='7' rx='1'/><rect x='14' y='3' width='7' height='7' rx='1'/><rect x='3' y='14' width='7' height='7' rx='1'/><rect x='14' y='14' width='7' height='7' rx='1'/>"
+        };
+        return $"<svg viewBox='0 0 24 24' focusable='false'>{path}</svg>";
+    }
+}

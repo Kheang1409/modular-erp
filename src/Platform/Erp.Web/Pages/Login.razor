@@ -1,0 +1,22 @@
+@page "/account/login"
+
+<PageTitle>Log in</PageTitle>
+<article class="card login-card">
+    <p class="eyebrow">Secure access</p>
+    <h1>Log in</h1>
+    @if (Failed) { <p class="error" role="alert">The email or password is incorrect.</p> }
+    <form method="post" action="/account/login">
+        <AntiforgeryToken />
+        <input name="returnUrl" type="hidden" value="@ReturnUrl" />
+        <label>Email <input name="email" type="email" autocomplete="username" required /></label>
+        <label>Password <input name="password" type="password" autocomplete="current-password" required /></label>
+        <button class="button" type="submit">Log in</button>
+    </form>
+</article>
+
+@code {
+    [SupplyParameterFromQuery(Name = "failed")]
+    public bool Failed { get; set; }
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    public string? ReturnUrl { get; set; }
+}

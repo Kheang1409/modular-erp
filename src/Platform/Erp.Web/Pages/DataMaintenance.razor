@@ -1,0 +1,78 @@
+@page "/administration/data-maintenance"
+@attribute [Authorize(Policy = PlatformPermissions.OperationsManage)]
+@inject IDataMaintenanceService Maintenance
+
+<PageTitle>Data maintenance</PageTitle>
+
+<div class="entity-page">
+    <div class="page-heading">
+        <div><p class="eyebrow">Administration</p><h1>Data maintenance</h1><p class="muted">Remove older completed background work for your current company.</p></div>
+    </div>
+    @if (_error is not null) { <div class="notice notice-error" role="alert">@_error</div> }
+    <div role="status" aria-live="polite" aria-atomic="true">@if (_message is not null) { <div class="notice notice-success">@_message</div> }</div>
+
+    <section class="card" aria-labelledby="retention-heading">
+        <h2 id="retention-heading">Keep recent history</h2>
+        <p class="muted">Sales, purchases, inventory, accounting, users, attachments, and audit history are kept. Failed or pending work and jobs with duplicate-prevention keys are also kept.</p>
+        <div class="form-grid">
+            <label for="maintenance-retention"><span>Days of completed work to keep</span><input id="maintenance-retention" type="number" min="30" max="3650" step="1" @bind="_retentionDays" @bind:after="ClearPreview" disabled="@_busy" /><small>Choose 30 to 3,650 days. Completion date determines eligibility.</small></label>
+        </div>
+        <div class="form-actions"><button type="button" class="button-secondary" disabled="@_busy" @onclick="Preview">@(_busy ? "Please wait..." : "Preview cleanup")</button></div>
+    </section>
+
+    @if (_preview is not null)
+    {
+        <section class="card" aria-labelledby="preview-heading">
+            <p class="eyebrow">@_preview.CompanyCode</p><h2 id="preview-heading">Cleanup preview for @_preview.CompanyName</h2>
+            <p class="muted">Only completed work before @_preview.CutoffUtc.ToString("yyyy-MM-dd HH:mm 'UTC'") is eligible. This preview expires at @_preview.ExpiresAtUtc.ToString("HH:mm 'UTC'").</p>
+            <dl class="details"><dt>Successful background jobs</dt><dd>@_preview.SuccessfulJobCount</dd><dt>Processed integration messages</dt><dd>@_preview.ProcessedOutboxCount</dd></dl>
+            @if (_preview.SuccessfulJobCount + _preview.ProcessedOutboxCount == 0)
+            {
+                <div class="empty-state"><h3>No cleanup needed</h3><p>There is no eligible completed work older than your retention period.</p></div>
+            }
+            else
+            {
+                <p>These completed records will be permanently removed. Review the company and counts above before continuing.</p>
+                <label for="maintenance-confirmation"><span>Type <strong>@_preview.ConfirmationText</strong> to confirm</span><input id="maintenance-confirmation" autocomplete="off" @bind="_confirmation" @bind:event="oninput" disabled="@_busy" /></label>
+                <div class="form-actions"><button type="button" disabled="@(_busy || _confirmation != _preview.ConfirmationText)" @onclick="Execute">@(_busy ? "Cleaning..." : "Clean completed work")</button><button type="button" class="button-secondary" disabled="@_busy" @onclick="ClearPreview">Cancel</button></div>
+            }
+        </section>
+    }
+</div>
+
+@code {
+    private int _retentionDays = 90;
+    private DataMaintenancePreview? _preview;
+    private string _confirmation = "";
+    private string? _error, _message;
+    private bool _busy;
+
+    private void ClearPreview() { _preview = null; _confirmation = ""; _error = _message = null; }
+
+    private async Task Preview()
+    {
+        if (_busy) return;
+        _busy = true; ClearPreview();
+        try
+        {
+            _preview = await Maintenance.PreviewAsync(_retentionDays, CancellationToken.None);
+            _message = $"Preview ready for {_preview.CompanyName}: {_preview.SuccessfulJobCount} successful jobs and {_preview.ProcessedOutboxCount} processed messages are eligible for cleanup.";
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException) { _error = exception.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task Execute()
+    {
+        if (_busy || _preview is null || _confirmation != _preview.ConfirmationText) return;
+        _busy = true; _error = _message = null;
+        try
+        {
+            var result = await Maintenance.ExecuteAsync(new(_preview.PreviewToken, _confirmation), CancellationToken.None);
+            _message = $"Cleanup completed: {result.DeletedJobCount} successful jobs and {result.DeletedOutboxCount} processed messages removed from {_preview.CompanyName}.";
+            _preview = null; _confirmation = "";
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException) { _error = exception.Message; _preview = null; _confirmation = ""; }
+        finally { _busy = false; }
+    }
+}

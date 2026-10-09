@@ -1,0 +1,16 @@
+@page "/help"
+@attribute [Authorize]
+
+<PageTitle>Getting started</PageTitle>
+
+<div class="entity-page">
+    <div class="page-heading"><div><p class="eyebrow">Guidance</p><h1>Getting started</h1><p class="muted">A practical map of your organization, companies, and daily workflows.</p></div></div>
+    <div class="detail-grid">
+        <section class="detail-panel"><p class="eyebrow">1 · Set up</p><h2>Organization and companies</h2><p>Your organization contains its operating companies. Add or edit a company under <a href="/organization">Organization</a>. Administrators can create an access profile in <a href="/administration/roles">Roles and permissions</a>, then add team members from <a href="/administration/users">Users and access</a>.</p></section>
+        <section class="detail-panel"><p class="eyebrow">2 · Configure</p><h2>Company settings</h2><p>Use the header switcher to choose a company. Products, contacts, inventory, sales, purchasing, accounting, currencies, and reports then operate in that company.</p></section>
+        <section class="detail-panel"><p class="eyebrow">3 · Sell</p><h2>Quote to payment</h2><p>Create reusable products and contacts, prepare a quotation, confirm the sales order, ship inventory, invoice the customer, and record payment.</p></section>
+        <section class="detail-panel"><p class="eyebrow">4 · Buy</p><h2>Purchase to payment</h2><p>Create a purchase order, receive goods into inventory, enter the supplier bill, then record the supplier payment.</p></section>
+    </div>
+    <section class="card company-list-section"><p class="eyebrow">Important</p><h2>How company separation works</h2><p>Users and roles are shared by the organization. Business documents and operational settings are company-scoped. Switching companies changes the active data boundary; it does not merge records between companies.</p></section>
+    <section class="card company-list-section"><p class="eyebrow">Administration</p><h2>Maintain access and completed work</h2><p>Administrators can disable a user, unlock an account, or set a new password from Users and access. Access changes require affected users to sign in again. <a href="/administration/data-maintenance">Data maintenance</a> previews old successful background work for the selected company and preserves business records and audit history.</p></section>
+</div>
