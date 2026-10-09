@@ -1,0 +1,33 @@
+@page "/accounting/invoices"
+@attribute [Authorize(Policy = AccountingPermissions.InvoiceRead)]
+@inject HttpClient Http
+
+<PageTitle>Customer invoices</PageTitle>
+<article class="card contacts-card">
+    <p class="eyebrow">Accounts receivable</p>
+    <h1>Customer invoices</h1>
+    <p>Create invoices from confirmed sales orders. Commercial details and totals are copied from the server-side order snapshot.</p>
+    @if (_loading) { <p role="status">Loading customer invoices...</p> }
+    else if (_error is not null) { <div class="notice notice-error" role="alert">@_error <button type="button" @onclick="Load">Try again</button></div> }
+    else
+    {
+        <AuthorizeView Policy="@AccountingPermissions.InvoiceManage" Context="invoiceAuth">
+            <section><h2>Invoice a sales order</h2><EditForm Model="_create" OnValidSubmit="Create" FormName="customer-invoice" Context="invoiceForm"><DataAnnotationsValidator/><ValidationSummary/><div class="content-grid"><label>Sales order ID <InputText @bind-Value="_create.SalesOrderId" /></label><label>Invoice date <InputDate @bind-Value="_create.InvoiceDate" /></label><label>Due date <InputDate @bind-Value="_create.DueDate" /></label></div><button disabled="@_saving">Create draft</button></EditForm></section>
+        </AuthorizeView>
+        @if (_message is not null) { <div class="notice notice-success" role="status">@_message</div> }
+        <h2>Receivables</h2>
+        @if (_invoices.Count == 0) { <p>No customer invoices yet.</p> }
+        else { <div class="table-scroll" tabindex="0"><table><thead><tr><th>Invoice</th><th>Customer</th><th>Due</th><th>Total</th><th>Outstanding</th><th>Status</th><th>Actions</th></tr></thead><tbody>@foreach(var invoice in _invoices){<tr><td>@invoice.Number<br/><small>@invoice.SalesOrderNumber</small></td><td>@invoice.CustomerName</td><td>@invoice.DueDate</td><td>@invoice.Total.ToString("N2") @invoice.CurrencyCode</td><td>@invoice.AmountDue.ToString("N2") @invoice.CurrencyCode</td><td>@invoice.State</td><td>@if(invoice.State == CustomerInvoiceState.Draft){<AuthorizeView Policy="@AccountingPermissions.InvoicePost" Context="postAuth"><button disabled="@_saving" @onclick="() => Post(invoice)">Post</button></AuthorizeView><AuthorizeView Policy="@AccountingPermissions.InvoiceManage" Context="cancelAuth"><button class="button-secondary" disabled="@_saving" @onclick="() => Cancel(invoice)">Cancel</button></AuthorizeView>}</td></tr>}</tbody></table></div> }
+    }
+</article>
+
+@code {
+    private readonly List<CustomerInvoiceDto> _invoices = []; private readonly List<JournalDto> _journals = []; private readonly List<AccountDto> _accounts = []; private CreateForm _create = new(); private bool _loading = true, _saving; private string? _error, _message;
+    protected override Task OnInitializedAsync() => Load();
+    private async Task Load(){_loading=true;_error=null;try{_invoices.Clear();_invoices.AddRange(await Http.GetFromJsonAsync<List<CustomerInvoiceDto>>("api/v1/accounting/invoices")??[]);_journals.Clear();_journals.AddRange(await Http.GetFromJsonAsync<List<JournalDto>>("api/v1/accounting/journals")??[]);_accounts.Clear();_accounts.AddRange(await Http.GetFromJsonAsync<List<AccountDto>>("api/v1/accounting/accounts")??[]);}catch(HttpRequestException){_error="Customer invoices could not be loaded.";}finally{_loading=false;}}
+    private async Task Create(){if(!Guid.TryParse(_create.SalesOrderId,out var orderId)){_error="Enter a valid sales order ID.";return;}await Send(()=>Http.PostAsJsonAsync("api/v1/accounting/invoices/from-sales-order",new CreateCustomerInvoiceRequest(orderId,_create.InvoiceDate,_create.DueDate,Guid.NewGuid().ToString("N"))),"Invoice draft created.");}
+    private async Task Post(CustomerInvoiceDto invoice){var journal=_journals.FirstOrDefault(x=>x.IsActive);var receivable=_accounts.FirstOrDefault(x=>x.IsActive&&x.AllowDirectPosting&&x.Type==AccountType.Asset);var revenue=_accounts.FirstOrDefault(x=>x.IsActive&&x.AllowDirectPosting&&x.Type==AccountType.Revenue);var tax=_accounts.FirstOrDefault(x=>x.IsActive&&x.AllowDirectPosting&&x.Type==AccountType.Liability);if(journal is null||receivable is null||revenue is null||(invoice.TaxTotal>0&&tax is null)){_error="Configure an active journal plus direct-posting receivable, revenue, and tax liability accounts.";return;}await Send(()=>Http.PostAsJsonAsync($"api/v1/accounting/invoices/{invoice.Id}/post",new PostCustomerInvoiceRequest(journal.Id,receivable.Id,revenue.Id,tax?.Id,invoice.ConcurrencyStamp,Guid.NewGuid().ToString("N"))),$"{invoice.Number} posted.");}
+    private Task Cancel(CustomerInvoiceDto invoice)=>Send(()=>Http.PostAsJsonAsync($"api/v1/accounting/invoices/{invoice.Id}/cancel",new AccountingActionRequest(invoice.ConcurrencyStamp)),$"{invoice.Number} cancelled.");
+    private async Task Send(Func<Task<HttpResponseMessage>> action,string message){_saving=true;_error=null;_message=null;try{var response=await action();if(response.IsSuccessStatusCode){_message=message;await Load();}else _error=await response.Content.ReadAsStringAsync();}catch(HttpRequestException){_error="The server could not be reached.";}finally{_saving=false;}}
+    private sealed class CreateForm{[System.ComponentModel.DataAnnotations.Required]public string SalesOrderId{get;set;}="";public DateOnly InvoiceDate{get;set;}=DateOnly.FromDateTime(DateTime.Today);public DateOnly DueDate{get;set;}=DateOnly.FromDateTime(DateTime.Today.AddDays(30));}
+}

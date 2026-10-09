@@ -1,0 +1,103 @@
+@page "/accounting/entries"
+@attribute [Authorize(Policy = AccountingPermissions.Read)]
+@inject HttpClient Http
+
+<PageTitle>General ledger</PageTitle>
+<article class="card contacts-card">
+    <p class="eyebrow">Accounting</p>
+    <h1>General ledger</h1>
+    <p>Create balanced drafts, post them into an open period, and correct mistakes with traceable reversals.</p>
+
+    @if (_loading)
+    {
+        <p role="status">Loading journal entries...</p>
+    }
+    else if (_error is not null)
+    {
+        <div class="notice notice-error" role="alert">@_error <button type="button" @onclick="Load">Try again</button></div>
+    }
+    else
+    {
+        <AuthorizeView Policy="@AccountingPermissions.Post" Context="ledgerAuth">
+            <section>
+                <h2>New journal entry</h2>
+                @if (_journals.Count == 0 || _accounts.Count < 2)
+                {
+                    <p>Configure at least one journal and two direct-posting accounts before creating an entry.</p>
+                }
+                else
+                {
+                    <EditForm Model="_draft" OnValidSubmit="Create" FormName="journal-entry" Context="entryForm">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary />
+                        <div class="content-grid">
+                            <label>Journal <InputSelect @bind-Value="_draft.JournalId">@foreach (var journal in _journals.Where(x => x.IsActive)){<option value="@journal.Id">@journal.Code - @journal.Name</option>}</InputSelect></label>
+                            <label>Business date <InputDate @bind-Value="_draft.BusinessDate" /></label>
+                            <label>Currency <InputText @bind-Value="_draft.CurrencyCode" maxlength="3" /></label>
+                            <label>Exchange rate <InputNumber @bind-Value="_draft.ExchangeRate" /></label>
+                        </div>
+                        <label>Description <InputText @bind-Value="_draft.Description" /></label>
+                        <div class="table-scroll" tabindex="0">
+                            <table><thead><tr><th>Account</th><th>Description</th><th>Debit</th><th>Credit</th></tr></thead><tbody>
+                                @foreach (var line in _draft.Lines)
+                                {
+                                    <tr><td><InputSelect @bind-Value="line.AccountId">@foreach (var account in _accounts.Where(x => x.IsActive && x.AllowDirectPosting)){<option value="@account.Id">@account.Code - @account.Name</option>}</InputSelect></td><td><InputText @bind-Value="line.Description" /></td><td><InputNumber @bind-Value="line.Debit" /></td><td><InputNumber @bind-Value="line.Credit" /></td></tr>
+                                }
+                            </tbody><tfoot><tr><th colspan="2">Totals</th><th>@_draft.Lines.Sum(x => x.Debit).ToString("N2")</th><th>@_draft.Lines.Sum(x => x.Credit).ToString("N2")</th></tr></tfoot></table>
+                        </div>
+                        <button type="button" class="button-secondary" @onclick="AddLine">Add line</button>
+                        <button disabled="@_saving">Save draft</button>
+                    </EditForm>
+                }
+            </section>
+        </AuthorizeView>
+
+        @if (_message is not null) { <div class="notice notice-success" role="status">@_message</div> }
+        <h2>Entries</h2>
+        @if (_entries.Count == 0)
+        {
+            <p>No journal entries yet.</p>
+        }
+        else
+        {
+            <div class="table-scroll" tabindex="0"><table><thead><tr><th>Number</th><th>Date</th><th>Description</th><th>Debit</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+                @foreach (var entry in _entries)
+                {
+                    <tr><td>@entry.Number</td><td>@entry.BusinessDate</td><td>@entry.Description</td><td>@entry.Lines.Sum(x => x.Debit).ToString("N2") @entry.CurrencyCode</td><td>@entry.State</td><td><AuthorizeView Policy="@AccountingPermissions.Post" Context="entryAuth">@if(entry.State == JournalEntryState.Draft){<button disabled="@_saving" @onclick="() => Post(entry)">Post</button>}else if(entry.ReversesEntryId is null && entry.ReversedByEntryId is null){<button class="button-secondary" disabled="@_saving" @onclick="() => Reverse(entry)">Reverse</button>}</AuthorizeView></td></tr>
+                }
+            </tbody></table></div>
+        }
+    }
+</article>
+
+@code {
+    private readonly List<JournalEntryDto> _entries = [];
+    private readonly List<JournalDto> _journals = [];
+    private readonly List<AccountDto> _accounts = [];
+    private DraftForm _draft = new();
+    private bool _loading = true, _saving;
+    private string? _error, _message;
+
+    protected override Task OnInitializedAsync() => Load();
+    private async Task Load()
+    {
+        _loading = true; _error = null;
+        try
+        {
+            _entries.Clear(); _entries.AddRange(await Http.GetFromJsonAsync<List<JournalEntryDto>>("api/v1/accounting/entries") ?? []);
+            _journals.Clear(); _journals.AddRange(await Http.GetFromJsonAsync<List<JournalDto>>("api/v1/accounting/journals") ?? []);
+            _accounts.Clear(); _accounts.AddRange(await Http.GetFromJsonAsync<List<AccountDto>>("api/v1/accounting/accounts") ?? []);
+            InitializeSelections();
+        }
+        catch (HttpRequestException) { _error = "The general ledger could not be loaded."; }
+        finally { _loading = false; }
+    }
+    private void InitializeSelections() { if (_draft.JournalId == Guid.Empty) _draft.JournalId = _journals.FirstOrDefault(x => x.IsActive)?.Id ?? Guid.Empty; var ids = _accounts.Where(x => x.IsActive && x.AllowDirectPosting).Select(x => x.Id).ToArray(); for (var index = 0; index < _draft.Lines.Count; index++) if (_draft.Lines[index].AccountId == Guid.Empty && ids.Length > 0) _draft.Lines[index].AccountId = ids[Math.Min(index, ids.Length - 1)]; }
+    private void AddLine() { _draft.Lines.Add(new()); InitializeSelections(); }
+    private async Task Create() { var request = new JournalEntryRequest(_draft.JournalId, _draft.BusinessDate, _draft.Description, _draft.CurrencyCode, _draft.ExchangeRate, _draft.Lines.Select(x => new JournalEntryLineRequest(x.AccountId, x.Description, x.Debit, x.Credit)).ToList(), Guid.NewGuid().ToString("N")); await Send(() => Http.PostAsJsonAsync("api/v1/accounting/entries", request), "Draft created."); if (_error is null) { _draft = new(); InitializeSelections(); } }
+    private Task Post(JournalEntryDto entry) => Send(() => Http.PostAsJsonAsync($"api/v1/accounting/entries/{entry.Id}/post", new PostJournalEntryRequest(entry.ConcurrencyStamp, Guid.NewGuid().ToString("N"))), $"{entry.Number} posted.");
+    private Task Reverse(JournalEntryDto entry) => Send(() => Http.PostAsJsonAsync($"api/v1/accounting/entries/{entry.Id}/reverse", new ReverseJournalEntryRequest(DateOnly.FromDateTime(DateTime.Today), $"Reversal of {entry.Number}", Guid.NewGuid().ToString("N"))), $"{entry.Number} reversed.");
+    private async Task Send(Func<Task<HttpResponseMessage>> action, string message) { _saving = true; _error = null; _message = null; try { var response = await action(); if (response.IsSuccessStatusCode) { _message = message; await Load(); } else { var detail = await response.Content.ReadAsStringAsync(); _error = string.IsNullOrWhiteSpace(detail) ? "The accounting change was rejected." : detail; } } catch (HttpRequestException) { _error = "The server could not be reached."; } finally { _saving = false; } }
+    private sealed class DraftForm { public Guid JournalId { get; set; } public DateOnly BusinessDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); [System.ComponentModel.DataAnnotations.Required] public string Description { get; set; } = string.Empty; [System.ComponentModel.DataAnnotations.Required] public string CurrencyCode { get; set; } = "USD"; public decimal ExchangeRate { get; set; } = 1; public List<LineForm> Lines { get; } = [new() { Debit = 1 }, new() { Credit = 1 }]; }
+    private sealed class LineForm { public Guid AccountId { get; set; } public string Description { get; set; } = string.Empty; public decimal Debit { get; set; } public decimal Credit { get; set; } }
+}
