@@ -1,0 +1,5 @@
+@page "/crm/leads/{Id:guid}"
+@attribute [Authorize(Policy = CrmPermissions.Manage)]
+@inject ILeadService Leads
+<PageTitle>Edit lead</PageTitle><article class="card contacts-card"><p class="eyebrow">CRM</p><h1>Edit lead</h1>@if(Form is null){<p>Loading…</p>}else{<LeadEditor Model="Form" OnSubmit="Save" Busy="_busy" Error="@_error" FormName="edit-lead" />}</article>
+@code { [Parameter] public Guid Id {get;set;} private LeadForm? Form; private bool _busy;private string? _error; protected override async Task OnParametersSetAsync(){var lead=await Leads.GetAsync(Id,CancellationToken.None);Form=lead is null?null:LeadForm.From(lead);} private async Task Save(){if(Form is null)return;_busy=true;try{Form=LeadForm.From(await Leads.UpdateAsync(Id,Form.ToRequest(),CancellationToken.None));}catch(Exception ex){_error=ex.Message;}finally{_busy=false;}} }

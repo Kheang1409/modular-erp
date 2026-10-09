@@ -1,0 +1,6 @@
+@page "/crm/leads/new"
+@attribute [Authorize(Policy = CrmPermissions.Manage)]
+@inject ILeadService Leads
+@inject NavigationManager Navigation
+<PageTitle>New lead</PageTitle><article class="card contacts-card"><p class="eyebrow">CRM</p><h1>New lead</h1><LeadEditor Model="Form" OnSubmit="Save" Busy="_busy" Error="@_error" /></article>
+@code { private LeadForm Form { get; }=new(); private bool _busy; private string? _error; private async Task Save(){_busy=true;try{var lead=await Leads.CreateAsync(Form.ToRequest(),CancellationToken.None);Navigation.NavigateTo($"/crm/leads/{lead.Id}/details");}catch(Exception ex){_error=ex.Message;}finally{_busy=false;}} }

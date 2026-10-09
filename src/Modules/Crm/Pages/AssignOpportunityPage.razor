@@ -1,0 +1,7 @@
+@page "/crm/opportunities/{Id:guid}/assignment"
+@attribute [Authorize(Policy = CrmPermissions.Assign)]
+@inject IOpportunityService Opportunities
+@inject Erp.Abstractions.Organization.ICompanyUserDirectory Users
+@inject NavigationManager Navigation
+<PageTitle>Assign opportunity</PageTitle><article class="card contacts-card"><h1>Assign opportunity</h1>@if(_item is null){<p>Loading...</p>}else{<EditForm Model="Form" OnValidSubmit="Save" FormName="assign-opportunity"><label>Company user <InputSelect @bind-Value="Form.UserId"><option value="">Unassigned</option>@foreach(var user in _users){<option value="@user.Id">@user.DisplayName</option>}</InputSelect></label><button type="submit">Save assignment</button></EditForm>@if(_error is not null){<p role="alert">@_error</p>}}</article>
+@code{[Parameter]public Guid Id{get;set;}private OpportunityDto? _item;private IReadOnlyList<Erp.Abstractions.Organization.CompanyUserReference> _users=[];private AssignmentForm Form{get;}=new();private string? _error;protected override async Task OnParametersSetAsync(){_item=await Opportunities.GetAsync(Id,CancellationToken.None);_users=await Users.ListAsync(CancellationToken.None);Form.UserId=_item?.AssignedUserId;}private async Task Save(){try{await Opportunities.AssignAsync(Id,new(_item!.ConcurrencyStamp,Form.UserId),CancellationToken.None);Navigation.NavigateTo($"/crm/opportunities/{Id}");}catch(Exception ex){_error=ex.Message;}}private sealed class AssignmentForm{public Guid? UserId{get;set;}}}

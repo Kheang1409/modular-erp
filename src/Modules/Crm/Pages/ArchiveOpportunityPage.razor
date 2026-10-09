@@ -1,0 +1,6 @@
+@page "/crm/opportunities/{Id:guid}/archive"
+@attribute [Authorize(Policy = CrmPermissions.Archive)]
+@inject IOpportunityService Opportunities
+@inject NavigationManager Navigation
+<PageTitle>Opportunity status</PageTitle><article class="card contacts-card"><h1>@(_item?.IsArchived == true ? "Reactivate opportunity" : "Archive opportunity")</h1>@if(_item is null){<p>Loading...</p>}else{<p>Confirm this status change for <strong>@_item.Title</strong>.</p><button @onclick="Apply">@(_item.IsArchived ? "Reactivate" : "Archive")</button>@if(_error is not null){<p role="alert">@_error</p>}}</article>
+@code{[Parameter]public Guid Id{get;set;}private OpportunityDto? _item;private string? _error;protected override async Task OnParametersSetAsync()=>_item=await Opportunities.GetAsync(Id,CancellationToken.None);private async Task Apply(){try{await Opportunities.SetArchivedAsync(Id,_item!.ConcurrencyStamp,!_item.IsArchived,CancellationToken.None);Navigation.NavigateTo($"/crm/opportunities/{Id}");}catch(Exception ex){_error=ex.Message;}}}

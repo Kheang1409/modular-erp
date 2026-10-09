@@ -1,0 +1,8 @@
+<EditForm Model="Model" OnValidSubmit="Submit" FormName="@FormName"><DataAnnotationsValidator /><ValidationSummary />
+<div class="form-grid"><label>Title <InputText @bind-Value="Model.Title" /></label><label>Contact ID <InputText @bind-Value="ContactIdText" /></label>
+<label>Email <InputText @bind-Value="Model.Email" /></label><label>Phone <InputText @bind-Value="Model.Phone" /></label><label>Source <InputText @bind-Value="Model.Source" /></label>
+<label>Expected revenue <InputNumber @bind-Value="Model.ExpectedRevenue" /></label><label>Probability <InputNumber @bind-Value="Model.Probability" /></label>
+<label class="wide">Notes <InputTextArea @bind-Value="Model.Notes" /></label></div><button type="submit" disabled="@Busy">@(Busy ? "Saving…" : "Save lead")</button>
+@if (Error is not null) { <p class="validation-message" role="alert">@Error</p> }</EditForm>
+@code { [Parameter, EditorRequired] public LeadForm Model { get; set; } = new(); [Parameter] public EventCallback OnSubmit { get; set; } [Parameter] public bool Busy { get; set; } [Parameter] public string? Error { get; set; } [Parameter] public string FormName { get; set; } = "lead";
+private string? ContactIdText { get => Model.ContactId?.ToString(); set => Model.ContactId = Guid.TryParse(value, out var id) ? id : null; } private Task Submit() => OnSubmit.InvokeAsync(); }

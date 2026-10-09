@@ -1,0 +1,8 @@
+@page "/crm/leads"
+@attribute [Authorize(Policy = CrmPermissions.Read)]
+@inject ILeadService Leads
+<PageTitle>CRM leads</PageTitle><article class="card contacts-card"><p class="eyebrow">CRM</p><h1>Leads</h1><p><a class="button" href="/crm/leads/new">New lead</a> <a href="/crm/opportunities">Opportunities</a> <a href="/crm/stages">Pipeline stages</a></p>
+<form method="get"><label>Search <input name="search" value="@Search" /></label><label>State <select name="state"><option value="">All</option>@foreach(var state in Enum.GetValues<LeadState>()){<option value="@state" selected="@(SelectedState == state)">@state</option>}</select></label><button type="submit">Filter</button></form>
+@if (_page is null) { <p>Loading…</p> } else if (_page.Items.Count == 0) { <p>No leads match this view.</p> } else { <table><thead><tr><th>Lead</th><th>Contact</th><th>State</th><th>Revenue</th><th>Probability</th></tr></thead><tbody>@foreach(var lead in _page.Items){<tr><td><a href="@($"/crm/leads/{lead.Id}/details")">@lead.Title</a></td><td>@(lead.ContactName ?? "—")</td><td>@lead.State</td><td>@lead.ExpectedRevenue.ToString("N2")</td><td>@lead.Probability%</td></tr>}</tbody></table> }
+</article>
+@code { [SupplyParameterFromQuery] public string? Search { get; set; } [SupplyParameterFromQuery(Name="state")] public string? StateQuery { get; set; } [SupplyParameterFromQuery] public int Page { get; set; } private LeadPage? _page; private LeadState? SelectedState => Enum.TryParse<LeadState>(StateQuery,true,out var state)?state:null; protected override async Task OnParametersSetAsync()=>_page=await Leads.SearchAsync(new(Search,SelectedState,Page:Math.Max(1,Page)),CancellationToken.None); }

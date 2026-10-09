@@ -1,0 +1,6 @@
+@page "/crm/activities/{Id:guid}/manage"
+@attribute [Authorize(Policy = CrmPermissions.Manage)]
+@inject IActivityService Activities
+@inject NavigationManager Navigation
+<PageTitle>Manage activity</PageTitle><article class="card contacts-card"><h1>Manage activity</h1>@if(_item is null){<p>Loading or not found...</p>}else{<p><strong>@_item.Subject</strong> · @(_item.CompletedAtUtc is null ? "Open" : "Completed")</p><button @onclick="Apply">@(_item.CompletedAtUtc is null ? "Complete" : "Reopen")</button>@if(_error is not null){<p role="alert">@_error</p>}}</article>
+@code{[Parameter]public Guid Id{get;set;}[SupplyParameterFromQuery]public Guid? LeadId{get;set;}[SupplyParameterFromQuery]public Guid? OpportunityId{get;set;}private ActivityDto? _item;private string? _error;protected override async Task OnParametersSetAsync()=>_item=(await Activities.ListAsync(LeadId,OpportunityId,CancellationToken.None)).SingleOrDefault(x=>x.Id==Id);private async Task Apply(){try{await Activities.SetCompletedAsync(Id,_item!.ConcurrencyStamp,_item.CompletedAtUtc is null,CancellationToken.None);Navigation.NavigateTo(LeadId.HasValue?$"/crm/leads/{LeadId}/details":$"/crm/opportunities/{OpportunityId}");}catch(Exception ex){_error=ex.Message;}}}
