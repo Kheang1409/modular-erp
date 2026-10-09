@@ -1,0 +1,54 @@
+<Solution>
+  <Folder Name="/samples/" />
+  <Folder Name="/samples/CommunityHello/">
+    <Project Path="samples/CommunityHello/CommunityHello.csproj" />
+  </Folder>
+  <Folder Name="/samples/SampleModule/">
+    <Project Path="samples/SampleModule/Erp.Modules.Sample.csproj" />
+  </Folder>
+  <Folder Name="/src/" />
+  <Folder Name="/src/Platform/">
+    <Project Path="src/Platform/Erp.Abstractions/Erp.Abstractions.csproj" />
+    <Project Path="src/Platform/Erp.Core/Erp.Core.csproj" />
+    <Project Path="src/Platform/Erp.Host/Erp.Host.csproj" />
+    <Project Path="src/Platform/Erp.Infrastructure/Erp.Infrastructure.csproj" />
+    <Project Path="src/Platform/Erp.ModuleSystem/Erp.ModuleSystem.csproj" />
+    <Project Path="src/Platform/Erp.Web/Erp.Web.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/">
+    <Project Path="src/Modules/Accounting/Erp.Modules.Accounting.csproj" />
+    <Project Path="src/Modules/Accounting.Contracts/Erp.Modules.Accounting.Contracts.csproj" />
+    <Project Path="src/Modules/Reporting/Erp.Modules.Reporting.csproj" />
+    <Project Path="src/Modules/Contacts/Erp.Modules.Contacts.csproj" />
+    <Project Path="src/Modules/Contacts.Contracts/Erp.Modules.Contacts.Contracts.csproj" />
+    <Project Path="src/Modules/Crm/Erp.Modules.Crm.csproj" />
+    <Project Path="src/Modules/Crm.Contracts/Erp.Modules.Crm.Contracts.csproj" />
+    <Project Path="src/Modules/Products/Erp.Modules.Products.csproj" />
+    <Project Path="src/Modules/Products.Contracts/Erp.Modules.Products.Contracts.csproj" />
+    <Project Path="src/Modules/Purchasing/Erp.Modules.Purchasing.csproj" />
+    <Project Path="src/Modules/Purchasing.Contracts/Erp.Modules.Purchasing.Contracts.csproj" />
+    <Project Path="src/Modules/Inventory/Erp.Modules.Inventory.csproj" />
+    <Project Path="src/Modules/Inventory.Contracts/Erp.Modules.Inventory.Contracts.csproj" />
+    <Project Path="src/Modules/Sales/Erp.Modules.Sales.csproj" />
+    <Project Path="src/Modules/Sales.Contracts/Erp.Modules.Sales.Contracts.csproj" />
+  </Folder>
+  <Folder Name="/src/Shared/">
+    <Project Path="src/Shared/Erp.SharedKernel/Erp.SharedKernel.csproj" />
+  </Folder>
+  <Folder Name="/src/Tools/">
+    <Project Path="src/Tools/Erp.Cli/Erp.Cli.csproj" />
+  </Folder>
+  <Folder Name="/tests/" />
+  <Folder Name="/tests/ArchitectureTests/">
+    <Project Path="tests/ArchitectureTests/Erp.ArchitectureTests.csproj" />
+  </Folder>
+  <Folder Name="/tests/IntegrationTests/">
+    <Project Path="tests/IntegrationTests/Erp.IntegrationTests.csproj" />
+  </Folder>
+  <Folder Name="/tests/EndToEndTests/">
+    <Project Path="tests/EndToEndTests/Erp.EndToEndTests.csproj" />
+  </Folder>
+  <Folder Name="/tests/UnitTests/">
+    <Project Path="tests/UnitTests/Erp.UnitTests.csproj" />
+  </Folder>
+</Solution>

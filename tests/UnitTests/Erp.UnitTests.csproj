@@ -1,0 +1,45 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Platform\Erp.Abstractions\Erp.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\Platform\Erp.Infrastructure\Erp.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Platform\Erp.ModuleSystem\Erp.ModuleSystem.csproj" />
+    <ProjectReference Include="..\..\src\Platform\Erp.Host\Erp.Host.csproj" />
+    <ProjectReference Include="..\..\samples\SampleModule\Erp.Modules.Sample.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Contacts\Erp.Modules.Contacts.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Contacts.Contracts\Erp.Modules.Contacts.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Products\Erp.Modules.Products.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Products.Contracts\Erp.Modules.Products.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Crm\Erp.Modules.Crm.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Crm.Contracts\Erp.Modules.Crm.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Sales\Erp.Modules.Sales.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Sales.Contracts\Erp.Modules.Sales.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Purchasing\Erp.Modules.Purchasing.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Purchasing.Contracts\Erp.Modules.Purchasing.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Inventory\Erp.Modules.Inventory.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Inventory.Contracts\Erp.Modules.Inventory.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Accounting\Erp.Modules.Accounting.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Accounting.Contracts\Erp.Modules.Accounting.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Reporting\Erp.Modules.Reporting.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

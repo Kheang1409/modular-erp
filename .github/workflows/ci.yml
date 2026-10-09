@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.112
+      - run: dotnet restore Erp.slnx
+      - run: dotnet format Erp.slnx --verify-no-changes --no-restore
+      - run: dotnet build Erp.slnx --configuration Release --no-restore
+      - name: Package and install the community module sample
+        shell: pwsh
+        run: |
+          ./eng/pack-module.ps1 -Project samples/CommunityHello/CommunityHello.csproj -OutputRoot artifacts/community-module
+          dotnet run --project src/Tools/Erp.Cli --configuration Release --no-build -- module validate artifacts/community-module/community.hello-0.1.0.erpmod
+          dotnet run --project src/Tools/Erp.Cli --configuration Release --no-build -- module install artifacts/community-module/community.hello-0.1.0.erpmod --root artifacts/community-install
+          dotnet run --project src/Tools/Erp.Cli --configuration Release --no-build -- module disable community.hello --root artifacts/community-install
+          dotnet run --project src/Tools/Erp.Cli --configuration Release --no-build -- module enable community.hello --root artifacts/community-install
+      - run: dotnet list Erp.slnx package --vulnerable --include-transitive
+      - run: dotnet test Erp.slnx --configuration Release --no-build --logger trx
+      - if: github.ref == 'refs/heads/main'
+        run: docker build -t open-erp:${{ github.sha }} .
+      - if: github.ref == 'refs/heads/main'
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.74.0 image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed open-erp:${{ github.sha }}
+      - run: docker run --rm -v "${{ github.workspace }}:/workspace" aquasec/trivy:0.74.0 config --exit-code 1 --severity HIGH,CRITICAL /workspace
+
+  browser:
+    runs-on: ubuntu-latest
+    needs: build-test
+    env:
+      ERP_ADMIN_EMAIL: e2e@example.test
+      ERP_ADMIN_PASSWORD: E2e-Only-Password-14092020!
+      ERP_E2E_BASE_URL: http://localhost:8080
+      ERP_E2E_EMAIL: e2e@example.test
+      ERP_E2E_PASSWORD: E2e-Only-Password-14092020!
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.112
+      - run: dotnet restore Erp.slnx
+      - run: docker compose up -d --build --wait
+      - run: dotnet build tests/EndToEndTests/Erp.EndToEndTests.csproj --no-restore
+      - run: pwsh tests/EndToEndTests/bin/Debug/net10.0/playwright.ps1 install --with-deps chromium
+      - run: dotnet test tests/EndToEndTests/Erp.EndToEndTests.csproj --no-build --no-restore
+      - name: Rehearse PostgreSQL backup and isolated restore
+        run: docker compose exec -T postgres pg_dump --username=erp --dbname=erp --format=custom --file=/tmp/erp-ci.dump
+      - run: docker compose exec -T postgres createdb --username=erp erp_restore
+      - run: docker compose exec -T postgres pg_restore --username=erp --dbname=erp_restore --exit-on-error /tmp/erp-ci.dump
+      - name: Verify restored module data structures
+        run: test "$(docker compose exec -T postgres psql --username=erp --dbname=erp_restore --tuples-only --no-align --command="SELECT to_regclass('platform.tenants') IS NOT NULL AND to_regclass('inventory.stock_moves') IS NOT NULL AND to_regclass('accounting.journal_entries') IS NOT NULL;")" = "t"
+      - if: always()
+        run: docker compose logs --no-color
+      - if: always()
+        run: docker compose down -v
