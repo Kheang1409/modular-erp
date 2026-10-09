@@ -1,0 +1,36 @@
+@page "/inventory/reservations"
+@attribute [Authorize(Policy = InventoryPermissions.Read)]
+@inject HttpClient Http
+
+<PageTitle>Stock reservations</PageTitle>
+<article class="card contacts-card">
+    <p class="eyebrow">Inventory</p><h1>Stock reservations</h1>
+    <p><a href="/inventory/moves">Back to movements</a></p>
+    <EditForm Model="_filter" OnValidSubmit="Apply" FormName="reservation-filter">
+        <div class="form-grid">
+            <label>State <InputSelect @bind-Value="_filter.State"><option value="">All states</option>@foreach (var value in Enum.GetValues<ReservationState>()) { <option value="@value">@value</option> }</InputSelect></label>
+            <label>Location <InputSelect @bind-Value="_filter.LocationId"><option value="">All locations</option>@foreach (var value in _locations) { <option value="@value.Id">@value.Code — @value.Name</option> }</InputSelect></label>
+            <label>Sales order <InputSelect @bind-Value="_filter.ReferenceDocumentId"><option value="">All sales orders</option>@foreach (var order in _salesOrders) { <option value="@order.Id">@order.Number — @order.PartyName</option> }</InputSelect></label>
+        </div>
+        <button type="submit">Apply filters</button> <button type="button" @onclick="Reset">Reset</button>
+    </EditForm>
+    @if (_loading) { <p role="status">Loading reservations…</p> }
+    else if (_error is not null) { <p role="alert" class="validation-message">@_error</p> }
+    else if (_page is null || _page.Items.Count == 0) { <p>No reservations match the current filters.</p> }
+    else
+    {
+        <table><thead><tr><th>Product</th><th>Location</th><th>Reserved</th><th>Consumed</th><th>Remaining</th><th>Sales order</th><th>State</th></tr></thead><tbody>@foreach (var item in _page.Items) { <tr><td><a href="/inventory/reservations/@item.Id">@item.ProductId</a></td><td>@LocationName(item.LocationId)</td><td>@item.Quantity</td><td>@item.ConsumedQuantity</td><td>@item.RemainingQuantity</td><td>@if (item.ReferenceDocumentId is Guid orderId) { <a href="/sales/orders/@orderId">@SalesOrderName(orderId)</a> } else { <span>—</span> }</td><td>@item.State</td></tr> }</tbody></table>
+        <p>Page @_page.Page · @_page.Total reservation(s)</p><button type="button" disabled="@(_page.Page <= 1)" @onclick="Previous">Previous</button> <button type="button" disabled="@(_page.Page * _page.PageSize >= _page.Total)" @onclick="Next">Next</button>
+    }
+</article>
+
+@code {
+    private readonly List<LocationDto> _locations = []; private readonly List<SourceDocumentLookup> _salesOrders = []; private ReservationFilter _filter = new(); private ReservationPage? _page; private bool _loading = true; private string? _error;
+    protected override async Task OnInitializedAsync() { _locations.AddRange(await Http.GetFromJsonAsync<List<LocationDto>>("api/v1/inventory/locations") ?? []); _salesOrders.AddRange(await Http.GetFromJsonAsync<List<SourceDocumentLookup>>("api/v1/inventory/source-documents?type=Delivery") ?? []); await Load(); }
+    private async Task Load() { _loading = true; _error = null; var values = new List<string> { $"page={_filter.Page}", "pageSize=25" }; if (_filter.State is not null) values.Add($"state={_filter.State}"); if (_filter.LocationId is not null) values.Add($"locationId={_filter.LocationId}"); if (_filter.ReferenceDocumentId is Guid document) values.Add($"referenceDocumentId={document}"); try { _page = await Http.GetFromJsonAsync<ReservationPage>("api/v1/inventory/reservations?" + string.Join("&", values)); } catch (HttpRequestException ex) { _error = ex.Message; } _loading = false; }
+    private Task Apply() { _filter.Page = 1; return Load(); } private async Task Reset() { _filter = new(); await Load(); } private async Task Previous() { _filter.Page--; await Load(); } private async Task Next() { _filter.Page++; await Load(); }
+    private string LocationName(Guid id) => _locations.FirstOrDefault(x => x.Id == id) is { } location ? $"{location.Code} — {location.Name}" : id.ToString();
+    private string SalesOrderName(Guid id) => _salesOrders.FirstOrDefault(x => x.Id == id) is { } order ? $"{order.Number} — {order.PartyName}" : $"Order {id.ToString()[..8]}";
+    private sealed class ReservationFilter { public ReservationState? State { get; set; } public Guid? LocationId { get; set; } public Guid? ReferenceDocumentId { get; set; } public int Page { get; set; } = 1; }
+    private sealed record SourceDocumentLookup(Guid Id, string Number, string PartyName, IReadOnlyList<Guid> ProductIds);
+}

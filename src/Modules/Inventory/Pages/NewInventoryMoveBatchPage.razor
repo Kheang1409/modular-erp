@@ -1,0 +1,74 @@
+@page "/inventory/moves/batch/new"
+@attribute [Authorize(Policy = InventoryPermissions.Manage)]
+@inject HttpClient Http
+
+<PageTitle>New movement batch</PageTitle>
+<article class="card contacts-card">
+    <p class="eyebrow">Inventory</p><h1>New movement batch</h1>
+    <p>Create several product movements with one shared route and date. Every line is validated before any draft is saved.</p>
+    <p><a href="/inventory/moves/new">Create one movement</a> · <a href="/inventory/moves">Back to movements</a></p>
+    @if (_loading) { <p role="status">Loading products and locations…</p> }
+    else if (_loadError is not null) { <div class="notice notice-error" role="alert"><strong>Movement setup could not be loaded.</strong><span>@_loadError</span><button type="button" @onclick="Load">Try again</button></div> }
+    else if (_created is not null)
+    {
+        <div class="notice notice-success" role="status"><strong>@_created.Items.Count drafts created.</strong><span>Review and complete each movement when the stock operation occurs.</span></div>
+        <div class="created-grid">@foreach (var move in _created.Items) { <a class="created-item" href="/inventory/moves/@move.Id"><strong>@move.Number</strong><span>@move.ProductSku · @move.Quantity @move.UnitCode</span></a> }</div>
+        <p><button type="button" @onclick="StartAnother">Create another batch</button> <a class="button button-secondary" href="/inventory/moves">View movements</a></p>
+    }
+    else
+    {
+        <EditForm Model="_model" OnValidSubmit="Save" FormName="new-inventory-movement-batch">
+            <DataAnnotationsValidator /><ValidationSummary />
+            <div class="form-grid">
+                <label>Movement type <InputSelect @bind-Value="_model.Type">@foreach (var type in Enum.GetValues<StockMoveType>()) { <option value="@type">@type</option> }</InputSelect></label>
+                <label>Business date <InputDate @bind-Value="_model.BusinessDate" /></label>
+                <label>Source location <InputSelect @bind-Value="_model.SourceLocationId"><option value="">Select a source</option>@foreach (var location in SourceLocations) { <option value="@location.Id">@location.Code — @location.Name (@location.Type)</option> }</InputSelect></label>
+                <label>Destination location <InputSelect @bind-Value="_model.DestinationLocationId"><option value="">Select a destination</option>@foreach (var location in DestinationLocations) { <option value="@location.Id">@location.Code — @location.Name (@location.Type)</option> }</InputSelect></label>
+                <label class="wide">Filter products <InputText @bind-Value="_productFilter" @bind-Value:event="oninput" placeholder="Search by SKU or name" /></label>
+            </div>
+            <section class="line-section" aria-labelledby="movement-lines-heading">
+                <div class="section-heading"><div><p class="eyebrow">Products</p><h2 id="movement-lines-heading">Movement lines</h2></div><button type="button" class="button-secondary" @onclick="AddLine">Add line</button></div>
+                @foreach (var line in _model.Lines)
+                {
+                    <div class="line-editor" @key="line.Key">
+                        <label>Product <InputSelect @bind-Value="line.ProductId"><option value="@Guid.Empty">Select a product</option>@foreach (var product in AvailableProducts(line)) { <option value="@product.Id">@product.Sku — @product.Name</option> }</InputSelect></label>
+                        <label>Quantity <InputNumber @bind-Value="line.Quantity" /></label>
+                        <button type="button" class="button-danger" disabled="@(_model.Lines.Count == 1)" @onclick="() => RemoveLine(line)">Remove</button>
+                    </div>
+                }
+            </section>
+            <label>Notes <InputTextArea @bind-Value="_model.Notes" placeholder="Reason, carrier, count reference, or operational context" /></label>
+            @if (_error is not null) { <div class="notice notice-error" role="alert"><strong>Batch not created.</strong><span>@_error</span></div> }
+            <div class="action-bar"><span>@_model.Lines.Count line(s)</span><button type="submit" disabled="@_saving">@(_saving ? "Creating drafts…" : "Create all drafts")</button></div>
+        </EditForm>
+    }
+</article>
+
+@code {
+    private readonly List<ProductLookup> _products = []; private readonly List<LocationDto> _locations = [];
+    private BatchForm _model = new(); private string _productFilter = ""; private string? _loadError; private string? _error; private bool _loading = true; private bool _saving; private StockMoveBatchDto? _created;
+    private IEnumerable<LocationDto> SourceLocations => _locations.Where(x => _model.Type switch { StockMoveType.Receipt => x.Type is LocationType.Supplier or LocationType.InventoryGain, StockMoveType.Delivery or StockMoveType.Transfer => x.Type == LocationType.Internal, StockMoveType.Adjustment => x.Type is LocationType.Internal or LocationType.InventoryGain, _ => false });
+    private IEnumerable<LocationDto> DestinationLocations => _locations.Where(x => _model.Type switch { StockMoveType.Receipt or StockMoveType.Transfer => x.Type == LocationType.Internal, StockMoveType.Delivery => x.Type is LocationType.Customer or LocationType.InventoryLoss, StockMoveType.Adjustment => x.Type is LocationType.Internal or LocationType.InventoryLoss, _ => false });
+    protected override Task OnInitializedAsync() => Load();
+    private async Task Load() { _loading = true; _loadError = null; try { var products = await Http.GetFromJsonAsync<ProductLookupPage>("api/v1/products/?tracksInventory=true&pageSize=100"); _products.Clear(); _products.AddRange(products?.Items.Where(x => !x.IsArchived) ?? []); _locations.Clear(); _locations.AddRange((await Http.GetFromJsonAsync<List<LocationDto>>("api/v1/inventory/locations") ?? []).Where(x => x.IsActive)); } catch (HttpRequestException) { _loadError = "Check your connection and permissions, then try again."; } finally { _loading = false; } }
+    private IEnumerable<ProductLookup> AvailableProducts(BatchLine line) => _products.Where(x => (string.IsNullOrWhiteSpace(_productFilter) || x.Sku.Contains(_productFilter, StringComparison.OrdinalIgnoreCase) || x.Name.Contains(_productFilter, StringComparison.OrdinalIgnoreCase)) && (x.Id == line.ProductId || _model.Lines.All(other => other == line || other.ProductId != x.Id)));
+    private void AddLine() { if (_model.Lines.Count < 100) _model.Lines.Add(new()); }
+    private void RemoveLine(BatchLine line) { if (_model.Lines.Count > 1) _model.Lines.Remove(line); }
+    private void StartAnother() { _model = new(); _created = null; _error = null; _productFilter = ""; }
+    private async Task Save()
+    {
+        _error = null;
+        if (_model.SourceLocationId is null || _model.DestinationLocationId is null) { _error = "Select both a source and destination location."; return; }
+        if (_model.Lines.Any(x => x.ProductId == Guid.Empty || x.Quantity <= 0)) { _error = "Every line needs a product and a quantity greater than zero."; return; }
+        if (_model.Lines.Select(x => x.ProductId).Distinct().Count() != _model.Lines.Count) { _error = "Each product can appear only once in a batch."; return; }
+        _saving = true;
+        try { var request = new StockMoveBatchRequest(_model.Type, _model.SourceLocationId, _model.DestinationLocationId, _model.BusinessDate, _model.Lines.Select(x => new StockMoveBatchLineRequest(x.ProductId, x.Quantity)).ToList(), Notes: _model.Notes); var response = await Http.PostAsJsonAsync("api/v1/inventory/moves/batch", request); if (response.IsSuccessStatusCode) _created = await response.Content.ReadFromJsonAsync<StockMoveBatchDto>(); else _error = await FriendlyError(response); }
+        catch (HttpRequestException) { _error = "The server could not be reached. Your entries are still here; try again."; }
+        finally { _saving = false; }
+    }
+    private static async Task<string> FriendlyError(HttpResponseMessage response) { if (response.StatusCode == System.Net.HttpStatusCode.Forbidden) return "You do not have permission to create movement batches."; if (response.StatusCode == System.Net.HttpStatusCode.Conflict) return "Inventory changed while you were working. Review the locations and try again."; try { using var json = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync()); if (json.RootElement.TryGetProperty("errors", out var errors)) return string.Join(" ", errors.EnumerateObject().SelectMany(x => x.Value.EnumerateArray()).Select(x => x.GetString()).Where(x => x is not null)); } catch (System.Text.Json.JsonException) { } return "The batch could not be created. Review the entries and try again."; }
+    private sealed class BatchForm { public StockMoveType Type { get; set; } public Guid? SourceLocationId { get; set; } public Guid? DestinationLocationId { get; set; } public DateOnly BusinessDate { get; set; } = DateOnly.FromDateTime(DateTime.UtcNow); public List<BatchLine> Lines { get; } = [new()]; [System.ComponentModel.DataAnnotations.StringLength(2000)] public string? Notes { get; set; } }
+    private sealed class BatchLine { public Guid Key { get; } = Guid.NewGuid(); public Guid ProductId { get; set; } public decimal Quantity { get; set; } = 1; }
+    private sealed record ProductLookup(Guid Id, string Sku, string Name, bool IsArchived);
+    private sealed record ProductLookupPage(IReadOnlyList<ProductLookup> Items);
+}

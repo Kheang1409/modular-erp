@@ -1,0 +1,55 @@
+@page "/inventory/moves/new"
+@attribute [Authorize(Policy = InventoryPermissions.Manage)]
+@inject HttpClient Http
+@inject NavigationManager Nav
+
+<PageTitle>New inventory movement</PageTitle>
+<article class="card contacts-card">
+    <p class="eyebrow">Inventory</p><h1>New inventory movement</h1>
+    <p>Need several products on the same route? <a href="/inventory/moves/batch/new">Create a movement batch</a>.</p>
+    @if (_loading) { <p role="status">Loading products and locations…</p> }
+    else if (_products.Count == 0 || !_locations.Any(x => x.Type == LocationType.Internal)) { <p role="alert">Create an active inventory product and internal location before recording a movement.</p> }
+    else
+    {
+        <EditForm Model="_model" OnValidSubmit="Save" FormName="new-inventory-movement">
+            <DataAnnotationsValidator /><ValidationSummary />
+            <div class="form-grid">
+                <label>Type <InputSelect @bind-Value="_model.Type" @bind-Value:after="MovementTypeChanged">@foreach (var type in Enum.GetValues<StockMoveType>()) { <option value="@type">@type</option> }</InputSelect></label>
+                @if (_model.Type is StockMoveType.Receipt or StockMoveType.Delivery)
+                {
+                    <label>Search source documents <InputText @bind-Value="_sourceDocumentFilter" /></label>
+                    <div class="field-action"><button type="button" @onclick="LoadSourceDocuments">Search</button></div>
+                    <label>Source document <InputSelect @bind-Value="_model.ReferenceDocumentId"><option value="">Unlinked movement</option>@foreach (var document in _sourceDocuments) { <option value="@document.Id">@document.Number — @document.PartyName</option> }</InputSelect></label>
+                }
+                <label>Search products <InputText @bind-Value="_productFilter" @bind-Value:event="oninput" /></label>
+                <label>Product <InputSelect @bind-Value="_model.ProductId"><option value="@Guid.Empty">Select a product</option>@foreach (var product in FilteredProducts) { <option value="@product.Id">@product.Sku — @product.Name</option> }</InputSelect></label>
+                <label>Quantity <InputNumber @bind-Value="_model.Quantity" /></label>
+                <label>Business date <InputDate @bind-Value="_model.BusinessDate" /></label>
+                <label>Filter locations <InputText @bind-Value="_locationFilter" @bind-Value:event="oninput" /></label>
+                <label>Source location <InputSelect @bind-Value="_model.SourceLocationId"><option value="">Select a source</option>@foreach (var location in SourceLocations) { <option value="@location.Id">@location.Code — @location.Name (@location.Type)</option> }</InputSelect></label>
+                <label>Destination location <InputSelect @bind-Value="_model.DestinationLocationId"><option value="">Select a destination</option>@foreach (var location in DestinationLocations) { <option value="@location.Id">@location.Code — @location.Name (@location.Type)</option> }</InputSelect></label>
+                <label class="wide">Notes <InputTextArea @bind-Value="_model.Notes" /></label>
+            </div>
+            <button type="submit" disabled="@_saving">Create draft</button>
+            @if (_error is not null) { <p role="alert" class="validation-message">@_error</p> }
+        </EditForm>
+    }
+</article>
+
+@code {
+    private readonly List<ProductLookup> _products = []; private readonly List<LocationDto> _locations = []; private readonly List<SourceDocumentLookup> _sourceDocuments = [];
+    private readonly MovementForm _model = new(); private string _productFilter = ""; private string _locationFilter = ""; private string _sourceDocumentFilter = ""; private string? _error; private bool _loading = true; private bool _saving;
+    private SourceDocumentLookup? SelectedDocument => _model.ReferenceDocumentId is Guid id ? _sourceDocuments.FirstOrDefault(x => x.Id == id) : null;
+    private IEnumerable<ProductLookup> FilteredProducts => _products.Where(x => (SelectedDocument is null || SelectedDocument.ProductIds.Contains(x.Id)) && (string.IsNullOrWhiteSpace(_productFilter) || x.Sku.Contains(_productFilter, StringComparison.OrdinalIgnoreCase) || x.Name.Contains(_productFilter, StringComparison.OrdinalIgnoreCase)));
+    private IEnumerable<LocationDto> FilteredLocations => _locations.Where(x => string.IsNullOrWhiteSpace(_locationFilter) || x.Code.Contains(_locationFilter, StringComparison.OrdinalIgnoreCase) || x.Name.Contains(_locationFilter, StringComparison.OrdinalIgnoreCase));
+    private IEnumerable<LocationDto> SourceLocations => FilteredLocations.Where(x => _model.Type switch { StockMoveType.Receipt => x.Type is LocationType.Supplier or LocationType.InventoryGain, StockMoveType.Delivery or StockMoveType.Transfer => x.Type == LocationType.Internal, StockMoveType.Adjustment => x.Type is LocationType.Internal or LocationType.InventoryGain, _ => false });
+    private IEnumerable<LocationDto> DestinationLocations => FilteredLocations.Where(x => _model.Type switch { StockMoveType.Receipt or StockMoveType.Transfer => x.Type == LocationType.Internal, StockMoveType.Delivery => x.Type is LocationType.Customer or LocationType.InventoryLoss, StockMoveType.Adjustment => x.Type is LocationType.Internal or LocationType.InventoryLoss, _ => false });
+    protected override async Task OnInitializedAsync() { var products = await Http.GetFromJsonAsync<ProductLookupPage>("api/v1/products/?tracksInventory=true&pageSize=100"); _products.AddRange(products?.Items.Where(x => !x.IsArchived) ?? []); _locations.AddRange((await Http.GetFromJsonAsync<List<LocationDto>>("api/v1/inventory/locations") ?? []).Where(x => x.IsActive)); await LoadSourceDocuments(); _loading = false; }
+    private async Task MovementTypeChanged() { _model.ReferenceDocumentId = null; _model.ProductId = Guid.Empty; _sourceDocumentFilter = ""; await LoadSourceDocuments(); }
+    private async Task LoadSourceDocuments() { _sourceDocuments.Clear(); if (_model.Type is not (StockMoveType.Receipt or StockMoveType.Delivery)) return; var search = string.IsNullOrWhiteSpace(_sourceDocumentFilter) ? "" : $"&search={Uri.EscapeDataString(_sourceDocumentFilter.Trim())}"; _sourceDocuments.AddRange(await Http.GetFromJsonAsync<List<SourceDocumentLookup>>($"api/v1/inventory/source-documents?type={_model.Type}{search}") ?? []); if (_model.ReferenceDocumentId is Guid id && _sourceDocuments.All(x => x.Id != id)) _model.ReferenceDocumentId = null; }
+    private async Task Save() { _saving = true; _error = null; if (_model.ProductId == Guid.Empty) { _error = "Select a product."; _saving = false; return; } var referenceType = _model.Type switch { StockMoveType.Receipt when _model.ReferenceDocumentId is not null => "PurchaseOrder", StockMoveType.Delivery when _model.ReferenceDocumentId is not null => "SalesOrder", _ => null }; var response = await Http.PostAsJsonAsync("api/v1/inventory/moves", new StockMoveRequest(_model.Type, _model.ProductId, _model.Quantity, _model.SourceLocationId, _model.DestinationLocationId, _model.BusinessDate, referenceType, _model.ReferenceDocumentId, _model.Notes)); if (response.IsSuccessStatusCode) { var move = await response.Content.ReadFromJsonAsync<StockMoveDto>(); Nav.NavigateTo($"/inventory/moves/{move!.Id}"); } else { _error = await response.Content.ReadAsStringAsync(); _saving = false; } }
+    private sealed class MovementForm { public StockMoveType Type { get; set; } [System.ComponentModel.DataAnnotations.Required] public Guid ProductId { get; set; } [System.ComponentModel.DataAnnotations.Range(typeof(decimal), "0.0001", "999999999")] public decimal Quantity { get; set; } = 1; public Guid? SourceLocationId { get; set; } public Guid? DestinationLocationId { get; set; } public Guid? ReferenceDocumentId { get; set; } public DateOnly BusinessDate { get; set; } = DateOnly.FromDateTime(DateTime.UtcNow); [System.ComponentModel.DataAnnotations.StringLength(2000)] public string? Notes { get; set; } }
+    private sealed record ProductLookup(Guid Id, string Sku, string Name, bool IsArchived);
+    private sealed record ProductLookupPage(IReadOnlyList<ProductLookup> Items);
+    private sealed record SourceDocumentLookup(Guid Id, string Number, string PartyName, IReadOnlyList<Guid> ProductIds);
+}

@@ -1,0 +1,72 @@
+@page "/inventory/warehouses"
+@attribute [Authorize(Policy = InventoryPermissions.Read)]
+@inject HttpClient Http
+
+<PageTitle>Warehouses and locations</PageTitle>
+<article class="card contacts-card">
+    <p class="eyebrow">Inventory configuration</p>
+    <h1>Warehouses and locations</h1>
+    <p>Locations with active reservations or draft movements cannot be deactivated.</p>
+    @if (_loading) { <p role="status">Loading inventory configuration…</p> }
+    else
+    {
+        <AuthorizeView Policy="@InventoryPermissions.Configure" Context="configurationAuthorization">
+            <Authorized>
+                <div class="form-grid">
+                    <section>
+                        <h2>@(_warehouse.Id is null ? "New warehouse" : "Edit warehouse")</h2>
+                        <EditForm Model="_warehouse" OnValidSubmit="SaveWarehouse" FormName="warehouse-editor">
+                            <DataAnnotationsValidator /><ValidationSummary />
+                            <label>Code <InputText @bind-Value="_warehouse.Code" /></label>
+                            <label>Name <InputText @bind-Value="_warehouse.Name" /></label>
+                            <label><InputCheckbox @bind-Value="_warehouse.IsActive" /> Active</label>
+                            <p><button type="submit" disabled="@_saving">Save warehouse</button> @if (_warehouse.Id is not null) { <button type="button" @onclick="ResetWarehouse">Cancel edit</button> }</p>
+                        </EditForm>
+                    </section>
+                    <section>
+                        <h2>@(_location.Id is null ? "New location" : "Edit location")</h2>
+                        <EditForm Model="_location" OnValidSubmit="SaveLocation" FormName="location-editor">
+                            <DataAnnotationsValidator /><ValidationSummary />
+                            <label>Code <InputText @bind-Value="_location.Code" /></label>
+                            <label>Name <InputText @bind-Value="_location.Name" /></label>
+                            <label>Type <InputSelect @bind-Value="_location.Type">@foreach (var type in Enum.GetValues<LocationType>()) { <option value="@type">@type</option> }</InputSelect></label>
+                            <label>Warehouse <InputSelect @bind-Value="_location.WarehouseId"><option value="">None</option>@foreach (var warehouse in _warehouses.Where(x => x.IsActive || x.Id == _location.WarehouseId)) { <option value="@warehouse.Id">@warehouse.Code — @warehouse.Name</option> }</InputSelect></label>
+                            <label><InputCheckbox @bind-Value="_location.IsActive" /> Active</label>
+                            <p><button type="submit" disabled="@_saving">Save location</button> @if (_location.Id is not null) { <button type="button" @onclick="ResetLocation">Cancel edit</button> }</p>
+                        </EditForm>
+                    </section>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+        @if (_message is not null) { <p role="status">@_message</p> }
+        @if (_error is not null) { <p role="alert" class="validation-message">@_error</p> }
+        <h2>Warehouses</h2>
+        @if (_warehouses.Count == 0) { <p>No warehouses have been configured.</p> }
+        else { <table><thead><tr><th>Code</th><th>Name</th><th>Status</th><th><span class="visually-hidden">Actions</span></th></tr></thead><tbody>@foreach (var warehouse in _warehouses) { <tr><td>@warehouse.Code</td><td>@warehouse.Name</td><td>@Status(warehouse.IsActive)</td><td><AuthorizeView Policy="@InventoryPermissions.Configure"><button type="button" @onclick="() => EditWarehouse(warehouse)">Edit</button></AuthorizeView></td></tr> }</tbody></table> }
+        <h2>Locations</h2>
+        <label>Filter locations <InputText @bind-Value="_locationFilter" @bind-Value:event="oninput" /></label>
+        @if (FilteredLocations.Count == 0) { <p>No matching locations.</p> }
+        else { <table><thead><tr><th>Code</th><th>Name</th><th>Type</th><th>Warehouse</th><th>Status</th><th><span class="visually-hidden">Actions</span></th></tr></thead><tbody>@foreach (var location in FilteredLocations) { <tr><td>@location.Code</td><td>@location.Name</td><td>@location.Type</td><td>@WarehouseName(location.WarehouseId)</td><td>@Status(location.IsActive)</td><td><AuthorizeView Policy="@InventoryPermissions.Configure"><button type="button" @onclick="() => EditLocation(location)">Edit</button></AuthorizeView></td></tr> }</tbody></table> }
+    }
+</article>
+
+@code {
+    private readonly List<WarehouseDto> _warehouses = [];
+    private readonly List<LocationDto> _locations = [];
+    private WarehouseForm _warehouse = new(); private LocationForm _location = new();
+    private string _locationFilter = ""; private string? _message; private string? _error; private bool _loading = true; private bool _saving;
+    private IReadOnlyList<LocationDto> FilteredLocations => _locations.Where(x => string.IsNullOrWhiteSpace(_locationFilter) || x.Code.Contains(_locationFilter, StringComparison.OrdinalIgnoreCase) || x.Name.Contains(_locationFilter, StringComparison.OrdinalIgnoreCase)).ToList();
+    protected override async Task OnInitializedAsync() { await Load(); _loading = false; }
+    private async Task Load() { _warehouses.Clear(); _warehouses.AddRange(await Http.GetFromJsonAsync<List<WarehouseDto>>("api/v1/inventory/warehouses") ?? []); _locations.Clear(); _locations.AddRange(await Http.GetFromJsonAsync<List<LocationDto>>("api/v1/inventory/locations") ?? []); }
+    private async Task SaveWarehouse() { _saving = true; ClearFeedback(); var request = new WarehouseRequest(_warehouse.Code, _warehouse.Name, _warehouse.IsActive, _warehouse.ConcurrencyStamp); var response = _warehouse.Id is Guid id ? await Http.PutAsJsonAsync($"api/v1/inventory/warehouses/{id}", request) : await Http.PostAsJsonAsync("api/v1/inventory/warehouses", request); await FinishSave(response, ResetWarehouse, "Warehouse saved."); }
+    private async Task SaveLocation() { _saving = true; ClearFeedback(); var request = new LocationRequest(_location.WarehouseId, _location.Code, _location.Name, _location.Type, _location.IsActive, _location.ConcurrencyStamp); var response = _location.Id is Guid id ? await Http.PutAsJsonAsync($"api/v1/inventory/locations/{id}", request) : await Http.PostAsJsonAsync("api/v1/inventory/locations", request); await FinishSave(response, ResetLocation, "Location saved."); }
+    private async Task FinishSave(HttpResponseMessage response, Action reset, string message) { if (response.IsSuccessStatusCode) { reset(); await Load(); _message = message; } else _error = await ApiError(response); _saving = false; }
+    private void EditWarehouse(WarehouseDto value) { ClearFeedback(); _warehouse = new() { Id = value.Id, Code = value.Code, Name = value.Name, IsActive = value.IsActive, ConcurrencyStamp = value.ConcurrencyStamp }; }
+    private void EditLocation(LocationDto value) { ClearFeedback(); _location = new() { Id = value.Id, WarehouseId = value.WarehouseId, Code = value.Code, Name = value.Name, Type = value.Type, IsActive = value.IsActive, ConcurrencyStamp = value.ConcurrencyStamp }; }
+    private void ResetWarehouse() => _warehouse = new(); private void ResetLocation() => _location = new(); private void ClearFeedback() { _message = null; _error = null; }
+    private string WarehouseName(Guid? id) => id is Guid value && _warehouses.FirstOrDefault(x => x.Id == value) is { } warehouse ? $"{warehouse.Code} — {warehouse.Name}" : "—";
+    private static string Status(bool active) => active ? "Active" : "Inactive";
+    private static async Task<string> ApiError(HttpResponseMessage response) { var text = await response.Content.ReadAsStringAsync(); return response.StatusCode == System.Net.HttpStatusCode.Conflict ? "The record changed or cannot be deactivated. Refresh and try again. " + text : text; }
+    private sealed class WarehouseForm { public Guid? Id { get; set; } [System.ComponentModel.DataAnnotations.Required, System.ComponentModel.DataAnnotations.StringLength(50)] public string Code { get; set; } = ""; [System.ComponentModel.DataAnnotations.Required, System.ComponentModel.DataAnnotations.StringLength(200)] public string Name { get; set; } = ""; public bool IsActive { get; set; } = true; public string? ConcurrencyStamp { get; set; } }
+    private sealed class LocationForm { public Guid? Id { get; set; } public Guid? WarehouseId { get; set; } [System.ComponentModel.DataAnnotations.Required, System.ComponentModel.DataAnnotations.StringLength(50)] public string Code { get; set; } = ""; [System.ComponentModel.DataAnnotations.Required, System.ComponentModel.DataAnnotations.StringLength(200)] public string Name { get; set; } = ""; public LocationType Type { get; set; } = LocationType.Internal; public bool IsActive { get; set; } = true; public string? ConcurrencyStamp { get; set; } }
+}

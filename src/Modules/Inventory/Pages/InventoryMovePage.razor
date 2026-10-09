@@ -1,0 +1,34 @@
+@page "/inventory/moves/{Id:guid}"
+@attribute [Authorize(Policy = InventoryPermissions.Read)]
+@inject HttpClient Http
+@inject NavigationManager Nav
+
+<PageTitle>Inventory movement</PageTitle>
+<article class="card contacts-card">
+    @if (_loading) { <p role="status">Loading movement…</p> }
+    else if (_move is null) { <p role="alert">Movement was not found.</p> }
+    else
+    {
+        <p class="eyebrow">Inventory movement</p><h1>@_move.Number</h1>
+        <dl><dt>State</dt><dd>@_move.State</dd><dt>Type</dt><dd>@_move.Type</dd><dt>Product</dt><dd>@_move.ProductSku</dd><dt>Quantity</dt><dd>@_move.Quantity @_move.UnitCode</dd><dt>Source</dt><dd>@LocationName(_move.SourceLocationId)</dd><dt>Destination</dt><dd>@LocationName(_move.DestinationLocationId)</dd><dt>Business date</dt><dd>@_move.BusinessDate</dd><dt>Source document</dt><dd>@(_move.ReferenceDocumentType ?? "—") @(_move.ReferenceDocumentId?.ToString() ?? "")</dd><dt>Notes</dt><dd>@(_move.Notes ?? "—")</dd></dl>
+        @if (_move.State == StockMoveState.Draft)
+        {
+            <AuthorizeView Policy="@InventoryPermissions.Complete"><button type="button" disabled="@_busy" @onclick="Complete">Complete</button></AuthorizeView>
+            <AuthorizeView Policy="@InventoryPermissions.Manage"><button type="button" disabled="@_busy" @onclick="Cancel">Cancel</button></AuthorizeView>
+        }
+        @if (_move.State == StockMoveState.Completed)
+        { <AuthorizeView Policy="@InventoryPermissions.Adjust"><button type="button" disabled="@_busy" @onclick="Correct">Create correction</button></AuthorizeView> }
+        @if (_message is not null) { <p role="status">@_message</p> } @if (_error is not null) { <p role="alert" class="validation-message">@_error</p> }
+    }
+</article>
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+    private readonly List<LocationDto> _locations = []; private StockMoveDto? _move; private bool _loading = true; private bool _busy; private string? _message; private string? _error;
+    protected override async Task OnParametersSetAsync() { _loading = true; _locations.Clear(); _locations.AddRange(await Http.GetFromJsonAsync<List<LocationDto>>("api/v1/inventory/locations") ?? []); try { _move = await Http.GetFromJsonAsync<StockMoveDto>($"api/v1/inventory/moves/{Id}"); } catch (HttpRequestException) { _move = null; } _loading = false; }
+    private async Task Complete() => await Act(() => Http.PostAsJsonAsync($"api/v1/inventory/moves/{Id}/complete", new CompleteMoveRequest(_move!.ConcurrencyStamp, Guid.NewGuid().ToString("N"))), "Movement completed.");
+    private async Task Cancel() => await Act(() => Http.PostAsJsonAsync($"api/v1/inventory/moves/{Id}/cancel", new MoveActionRequest(_move!.ConcurrencyStamp)), "Movement cancelled.");
+    private async Task Correct() { _busy = true; Clear(); var response = await Http.PostAsync($"api/v1/inventory/moves/{Id}/correct", null); if (response.IsSuccessStatusCode) { var correction = await response.Content.ReadFromJsonAsync<StockMoveDto>(); Nav.NavigateTo($"/inventory/moves/{correction!.Id}"); } else { _error = await response.Content.ReadAsStringAsync(); _busy = false; } }
+    private async Task Act(Func<Task<HttpResponseMessage>> send, string success) { _busy = true; Clear(); var response = await send(); if (response.IsSuccessStatusCode) { _move = await response.Content.ReadFromJsonAsync<StockMoveDto>(); _message = success; } else _error = await response.Content.ReadAsStringAsync(); _busy = false; }
+    private void Clear() { _message = null; _error = null; } private string LocationName(Guid? id) => id is Guid value && _locations.FirstOrDefault(x => x.Id == value) is { } location ? $"{location.Code} — {location.Name}" : "External";
+}

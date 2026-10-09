@@ -1,0 +1,46 @@
+@page "/inventory/balances"
+@attribute [Authorize(Policy = InventoryPermissions.Read)]
+@inject HttpClient Http
+
+<PageTitle>Inventory balances</PageTitle>
+<article class="card contacts-card">
+    <p class="eyebrow">Inventory</p><h1>Stock balances</h1>
+    <p>Balances are derived from completed movements. Warehouse totals repeat for each product and warehouse so location quantities can be reconciled directly.</p>
+    <p><a class="button" href="/inventory/moves">Movements</a> <a class="button" href="/inventory/reservations">Reservations</a></p>
+    <EditForm Model="_filter" OnValidSubmit="Apply" FormName="inventory-balance-filter">
+        <div class="form-grid">
+            <label>SKU, warehouse, or location <InputText @bind-Value="_filter.Search" /></label>
+            <label>Warehouse <InputSelect @bind-Value="_filter.WarehouseId"><option value="">All warehouses</option>@foreach (var value in _warehouses) { <option value="@value.Id">@value.Code — @value.Name</option> }</InputSelect></label>
+            <label>Location <InputSelect @bind-Value="_filter.LocationId"><option value="">All internal locations</option>@foreach (var value in InternalLocations) { <option value="@value.Id">@value.Code — @value.Name</option> }</InputSelect></label>
+            <label>Sort <InputSelect @bind-Value="_filter.Sort"><option value="sku">SKU</option><option value="warehouse">Warehouse</option><option value="location">Location</option><option value="available">Available quantity</option></InputSelect></label>
+            <label><InputCheckbox @bind-Value="_filter.IncludeZero" /> Include zero balances</label>
+            <label><InputCheckbox @bind-Value="_filter.Descending" /> Descending</label>
+        </div>
+        <button type="submit">Apply filters</button> <button type="button" @onclick="Reset">Reset</button>
+    </EditForm>
+    @if (_loading) { <p role="status">Loading balances…</p> }
+    else if (_error is not null) { <p role="alert" class="validation-message">@_error</p> }
+    else if (_page is null || _page.Items.Count == 0) { <p>No stock balances match the current filters.</p> }
+    else
+    {
+        <table>
+            <thead><tr><th>SKU</th><th>Warehouse</th><th>Location</th><th>On hand</th><th>Reserved</th><th>Available</th><th>Warehouse available</th></tr></thead>
+            <tbody>@foreach (var row in _page.Items) { <tr><td>@row.ProductSku</td><td>@row.WarehouseCode</td><td>@row.LocationCode</td><td>@row.OnHand @row.UnitCode</td><td>@row.Reserved @row.UnitCode</td><td>@row.Available @row.UnitCode</td><td>@row.WarehouseAvailable @row.UnitCode</td></tr> }</tbody>
+        </table>
+        <p>Page @_page.Page · @_page.Total balance row(s)</p>
+        <button type="button" disabled="@(_page.Page <= 1)" @onclick="Previous">Previous</button>
+        <button type="button" disabled="@(_page.Page * _page.PageSize >= _page.Total)" @onclick="Next">Next</button>
+    }
+</article>
+
+@code {
+    private readonly List<WarehouseDto> _warehouses = []; private readonly List<LocationDto> _locations = [];
+    private BalanceFilter _filter = new(); private StockBalancePage? _page; private bool _loading = true; private string? _error;
+    private IEnumerable<LocationDto> InternalLocations => _locations.Where(x => x.Type == LocationType.Internal && (_filter.WarehouseId is null || x.WarehouseId == _filter.WarehouseId));
+    protected override async Task OnInitializedAsync() { _warehouses.AddRange(await Http.GetFromJsonAsync<List<WarehouseDto>>("api/v1/inventory/warehouses") ?? []); _locations.AddRange(await Http.GetFromJsonAsync<List<LocationDto>>("api/v1/inventory/locations") ?? []); await Load(); }
+    private async Task Load() { _loading = true; _error = null; try { _page = await Http.GetFromJsonAsync<StockBalancePage>(Url()); } catch (HttpRequestException ex) { _error = ex.Message; } _loading = false; }
+    private string Url() { var values = new List<string> { $"page={_filter.Page}", "pageSize=25", $"sort={_filter.Sort}", $"descending={_filter.Descending}", $"includeZero={_filter.IncludeZero}" }; Add(values, "search", _filter.Search); Add(values, "warehouseId", _filter.WarehouseId); Add(values, "locationId", _filter.LocationId); return "api/v1/inventory/balances?" + string.Join("&", values); }
+    private static void Add(List<string> values, string name, object? value) { if (value is not null && !string.IsNullOrWhiteSpace(value.ToString())) values.Add($"{name}={Uri.EscapeDataString(value.ToString()!)}"); }
+    private Task Apply() { _filter.Page = 1; return Load(); } private async Task Reset() { _filter = new(); await Load(); } private async Task Previous() { _filter.Page--; await Load(); } private async Task Next() { _filter.Page++; await Load(); }
+    private sealed class BalanceFilter { public string? Search { get; set; } public Guid? WarehouseId { get; set; } public Guid? LocationId { get; set; } public bool IncludeZero { get; set; } public string Sort { get; set; } = "sku"; public bool Descending { get; set; } public int Page { get; set; } = 1; }
+}

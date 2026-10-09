@@ -1,0 +1,48 @@
+@page "/inventory/moves"
+@attribute [Authorize(Policy = InventoryPermissions.Read)]
+@inject HttpClient Http
+
+<PageTitle>Inventory movements</PageTitle>
+<article class="card contacts-card">
+    <p class="eyebrow">Inventory</p><h1>Inventory movements</h1>
+    <p>Completed movements are immutable. Corrections create compensating movements.</p>
+    <p><a class="button" href="/inventory/moves/new">New movement</a> <a class="button button-secondary" href="/inventory/moves/batch/new">New batch</a> <a class="button button-secondary" href="/inventory/balances">Balances</a> <a class="button button-secondary" href="/inventory/reservations">Reservations</a> <a class="button button-secondary" href="/inventory/warehouses">Warehouses</a></p>
+    <EditForm Model="_filter" OnValidSubmit="Apply" FormName="inventory-movement-filter">
+        <div class="form-grid">
+            <label>Number, SKU, or notes <InputText @bind-Value="_filter.Search" /></label>
+            <label>Type <InputSelect @bind-Value="_filter.Type"><option value="">All types</option>@foreach (var value in Enum.GetValues<StockMoveType>()) { <option value="@value">@value</option> }</InputSelect></label>
+            <label>State <InputSelect @bind-Value="_filter.State"><option value="">All states</option>@foreach (var value in Enum.GetValues<StockMoveState>()) { <option value="@value">@value</option> }</InputSelect></label>
+            <label>Warehouse <InputSelect @bind-Value="_filter.WarehouseId"><option value="">All warehouses</option>@foreach (var value in _warehouses) { <option value="@value.Id">@value.Code — @value.Name</option> }</InputSelect></label>
+            <label>Location <InputSelect @bind-Value="_filter.LocationId"><option value="">All locations</option>@foreach (var value in _locations) { <option value="@value.Id">@value.Code — @value.Name</option> }</InputSelect></label>
+            <label>From date <InputDate @bind-Value="_filter.FromDate" /></label><label>To date <InputDate @bind-Value="_filter.ToDate" /></label>
+            <label>Source document <InputSelect @bind-Value="_filter.ReferenceDocumentType"><option value="">All documents</option><option value="PurchaseOrder">Purchase order</option><option value="SalesOrder">Sales order</option><option value="StockMove">Correction</option></InputSelect></label>
+            <label>Sort <InputSelect @bind-Value="_filter.Sort"><option value="created">Created</option><option value="date">Business date</option><option value="number">Number</option><option value="sku">SKU</option></InputSelect></label>
+            <label><InputCheckbox @bind-Value="_filter.Descending" /> Descending</label>
+        </div>
+        <button type="submit">Apply filters</button> <button type="button" @onclick="Reset">Reset</button>
+    </EditForm>
+    @if (_loading) { <p role="status">Loading movements…</p> }
+    else if (_error is not null) { <p role="alert" class="validation-message">@_error</p> }
+    else if (_page is null || _page.Items.Count == 0) { <p>No movements match the current filters.</p> }
+    else
+    {
+        <table><thead><tr><th>Number</th><th>Date</th><th>Type</th><th>SKU</th><th>Quantity</th><th>Locations</th><th>Source</th><th>State</th></tr></thead>
+            <tbody>@foreach (var move in _page.Items) { <tr><td><a href="/inventory/moves/@move.Id">@move.Number</a></td><td>@move.BusinessDate</td><td>@move.Type</td><td>@move.ProductSku</td><td>@move.Quantity @move.UnitCode</td><td>@LocationName(move.SourceLocationId) → @LocationName(move.DestinationLocationId)</td><td>@(move.ReferenceDocumentType ?? "—")</td><td>@move.State</td></tr> }</tbody>
+        </table>
+        <p>Page @_page.Page · @_page.Total movement(s)</p>
+        <button type="button" disabled="@(_page.Page <= 1)" @onclick="Previous">Previous</button>
+        <button type="button" disabled="@(_page.Page * _page.PageSize >= _page.Total)" @onclick="Next">Next</button>
+    }
+</article>
+
+@code {
+    private readonly List<WarehouseDto> _warehouses = []; private readonly List<LocationDto> _locations = [];
+    private MoveFilter _filter = new(); private StockMovePage? _page; private bool _loading = true; private string? _error;
+    protected override async Task OnInitializedAsync() { _warehouses.AddRange(await Http.GetFromJsonAsync<List<WarehouseDto>>("api/v1/inventory/warehouses") ?? []); _locations.AddRange(await Http.GetFromJsonAsync<List<LocationDto>>("api/v1/inventory/locations") ?? []); await Load(); }
+    private async Task Load() { _loading = true; _error = null; try { _page = await Http.GetFromJsonAsync<StockMovePage>(Url()); } catch (HttpRequestException ex) { _error = ex.Message; } _loading = false; }
+    private string Url() { var values = new List<string> { $"page={_filter.Page}", "pageSize=25", $"sort={_filter.Sort}", $"descending={_filter.Descending}" }; Add(values, "search", _filter.Search); Add(values, "type", _filter.Type); Add(values, "state", _filter.State); Add(values, "warehouseId", _filter.WarehouseId); Add(values, "locationId", _filter.LocationId); Add(values, "fromDate", _filter.FromDate); Add(values, "toDate", _filter.ToDate); Add(values, "referenceDocumentType", _filter.ReferenceDocumentType); return "api/v1/inventory/moves?" + string.Join("&", values); }
+    private static void Add(List<string> values, string name, object? value) { if (value is not null && !string.IsNullOrWhiteSpace(value.ToString())) values.Add($"{name}={Uri.EscapeDataString(value.ToString()!)}"); }
+    private Task Apply() { _filter.Page = 1; return Load(); } private async Task Reset() { _filter = new(); await Load(); } private async Task Previous() { _filter.Page--; await Load(); } private async Task Next() { _filter.Page++; await Load(); }
+    private string LocationName(Guid? id) => id is Guid value && _locations.FirstOrDefault(x => x.Id == value) is { } location ? location.Code : "External";
+    private sealed class MoveFilter { public string? Search { get; set; } public StockMoveType? Type { get; set; } public StockMoveState? State { get; set; } public Guid? WarehouseId { get; set; } public Guid? LocationId { get; set; } public DateOnly? FromDate { get; set; } public DateOnly? ToDate { get; set; } public string? ReferenceDocumentType { get; set; } public string Sort { get; set; } = "created"; public bool Descending { get; set; } = true; public int Page { get; set; } = 1; }
+}
