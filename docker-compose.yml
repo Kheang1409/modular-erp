@@ -1,0 +1,48 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-erp}
+      POSTGRES_USER: ${POSTGRES_USER:-erp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-erp_local_only}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - erp-postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  erp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=${POSTGRES_DB:-erp};Username=${POSTGRES_USER:-erp};Password=${POSTGRES_PASSWORD:-erp_local_only}
+      Database__MigrateOnStartup: "true"
+      BootstrapAdmin__Email: ${ERP_ADMIN_EMAIL:-}
+      BootstrapAdmin__Password: ${ERP_ADMIN_PASSWORD:-}
+      DataProtection__KeysPath: /var/erp/keys
+      FileStorage__Provider: Local
+      FileStorage__LocalRootPath: /var/erp/files
+      Modules__ExternalPath: /var/erp/modules
+      Modules__Trust__RequireSignatures: ${MODULE_SIGNATURES_REQUIRED:-false}
+      Modules__Trust__TrustedKeysPath: /var/erp/trusted-publishers
+    ports:
+      - "${ERP_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - erp-keys:/var/erp/keys
+      - erp-files:/var/erp/files
+      - erp-modules:/var/erp/modules
+      - erp-trusted-publishers:/var/erp/trusted-publishers
+volumes:
+  erp-postgres:
+  erp-keys:
+  erp-files:
+  erp-modules:
+  erp-trusted-publishers:

@@ -1,0 +1,3 @@
+# Docker deployment
+
+The Compose file is a development topology with PostgreSQL health gating. PostgreSQL 18 stores its versioned data directory beneath the mounted `/var/lib/postgresql` path to support safe major-version upgrades. Cookie data-protection keys persist in a separate app-owned volume so sessions survive restarts; production deployments must back up and restrict access to this volume. Replace development credentials, avoid exposing PostgreSQL publicly, and terminate TLS at a trusted reverse proxy in shared environments. Production must set `Database__MigrateOnStartup=false` and apply reviewed migrations as a separate deployment step.
