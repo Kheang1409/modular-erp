@@ -1,0 +1,6 @@
+@page "/purchasing/orders/{Id:guid}/approve"
+@attribute [Authorize(Policy=PurchasingPermissions.Approve)]
+@inject IPurchaseOrderService Orders
+@inject NavigationManager Navigation
+<PageTitle>Purchase order approval</PageTitle><article class="card contacts-card"><h1>Purchase order approval</h1>@if(_item is null){<p>Loading...</p>}else{<p>@_item.Number is <strong>@_item.State</strong>.</p>@if(_item.State==PurchaseOrderState.Draft){<button @onclick="()=>Move(PurchaseOrderState.Sent)">Send</button>}@if(_item.State is PurchaseOrderState.Draft or PurchaseOrderState.Sent){<button @onclick="()=>Move(PurchaseOrderState.Confirmed)">Confirm</button>}@if(_error is not null){<p role="alert">@_error</p>}}</article>
+@code{[Parameter]public Guid Id{get;set;}private PurchaseOrderDto? _item;private string? _error;protected override async Task OnParametersSetAsync()=>_item=await Orders.GetAsync(Id,CancellationToken.None);private async Task Move(PurchaseOrderState target){try{_item=await Orders.TransitionAsync(Id,target,_item!.ConcurrencyStamp,CancellationToken.None);Navigation.NavigateTo($"/purchasing/orders/{Id}");}catch(Exception ex){_error=ex.Message;}}}

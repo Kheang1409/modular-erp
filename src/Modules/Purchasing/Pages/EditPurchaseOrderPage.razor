@@ -1,0 +1,6 @@
+@page "/purchasing/orders/{Id:guid}/edit"
+@attribute [Authorize(Policy=PurchasingPermissions.Manage)]
+@inject IPurchaseOrderService Orders
+@inject NavigationManager Navigation
+<PageTitle>Edit purchase order</PageTitle><article class="card contacts-card"><h1>Edit purchase order</h1>@if(Form is null){<p>Loading...</p>}else{<PurchaseOrderEditor Model="Form" OnSubmit="Save" Busy="_busy" Error="@_error" FormName="edit-purchase-order"/>}</article>
+@code{[Parameter]public Guid Id{get;set;}private PurchaseOrderForm? Form;private bool _busy;private string? _error;protected override async Task OnParametersSetAsync(){var x=await Orders.GetAsync(Id,CancellationToken.None);Form=x is null?null:PurchaseOrderForm.From(x);}private async Task Save(){_busy=true;try{var x=await Orders.UpdateAsync(Id,Form!.ToRequest(),CancellationToken.None);Navigation.NavigateTo($"/purchasing/orders/{x.Id}");}catch(Exception ex){_error=ex.Message;}finally{_busy=false;}}}
