@@ -1,0 +1,9 @@
+# Transactional outbox
+
+Integration events that must survive process failure are written through `IOutboxWriter`. The writer adds a versioned JSON message to the caller's existing `PlatformDbContext` but deliberately does not call `SaveChanges`; business changes and their message therefore commit or roll back in the same PostgreSQL transaction.
+
+Modules register immutable event payloads through `IIntegrationEventRegistry` using stable lowercase names such as `sample.greeting.published.v1`. A CLR payload type and external event name can each be registered only once, preventing ambiguous deserialization or accidental version aliases. Consumers implement `IIntegrationEventConsumer<TEvent>` and remain dependent only on public abstractions.
+
+The hosted publisher atomically claims messages using `FOR UPDATE SKIP LOCKED`, establishes the stored tenant/company context, and invokes scoped consumers sequentially. Messages retain correlation, retry, bounded failure, processed, and dead-letter metadata. Failed delivery uses exponential retry delays capped at five minutes; exhausted messages remain available for diagnosis.
+
+Delivery is at least once. A process may stop after a consumer's side effect but before `ProcessedAtUtc` is saved, so consumers must use the event ID as an idempotency key where side effects matter. Authorized operators can inspect payload-free dead-letter metadata and request an audited replay from **Administration > Queue recovery**. The current publisher targets in-process consumers. External transports, automatic retention cleanup, and per-consumer delivery checkpoints remain future adapters.
