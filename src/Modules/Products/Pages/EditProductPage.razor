@@ -1,0 +1,69 @@
+@page "/products/{Id:guid}"
+@attribute [Authorize(Policy = ProductsPermissions.Manage)]
+@inject IProductService Products
+@inject NavigationManager Navigation
+
+<PageTitle>Edit product</PageTitle>
+<article class="card contacts-card entity-page">
+    <div class="page-heading">
+        <div><p class="eyebrow">Product master</p><h1>Edit product</h1><p class="muted">Keep the catalog record consistent across every business workflow.</p></div>
+        <a class="button button-secondary" href="@($"/products/{Id}/details")">View product</a>
+    </div>
+    @if (_loading) { <div class="loading-state" role="status">Loading product…</div> }
+    else if (Form is null || _options is null) { <div class="empty-state" role="alert"><h2>Product not found</h2><a href="/products">Return to products</a></div> }
+    else
+    {
+        <ProductEditor Model="Form" Options="_options" OnSubmit="SaveAsync" Busy="_busy" Error="@_error" ServerErrors="_serverErrors" FormName="edit-product" />
+        <div class="danger-zone">
+            <div><strong>@(_archived ? "Reactivate this product" : "Archive this product")</strong><p>@(_archived ? "Return it to active product selectors." : "Hide it from new transactions while preserving its history.")</p></div>
+            <button type="button" class="@(_archived ? "button-secondary" : "button-danger")" @onclick="ToggleArchiveAsync" disabled="@_busy">@(_archived ? "Reactivate" : "Archive")</button>
+        </div>
+    }
+</article>
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+    private ProductForm? Form;
+    private ProductOptions? _options;
+    private bool _archived;
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+    private IReadOnlyDictionary<string, string[]> _serverErrors = new Dictionary<string, string[]>();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        var productTask = Products.GetAsync(Id, CancellationToken.None);
+        var optionsTask = Products.GetOptionsAsync(CancellationToken.None);
+        await Task.WhenAll(productTask, optionsTask);
+        var product = await productTask;
+        _options = await optionsTask;
+        if (product is not null) { Form = ProductForm.From(product); _archived = product.IsArchived; }
+        _loading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (Form is null) return;
+        _busy = true; _error = null; _serverErrors = new Dictionary<string, string[]>();
+        try { Form = ProductForm.From(await Products.UpdateAsync(Id, Form.ToRequest(), CancellationToken.None)); }
+        catch (ProductValidationException exception) { _serverErrors = exception.Errors; }
+        catch (Exception exception) { _error = exception.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task ToggleArchiveAsync()
+    {
+        if (Form?.ConcurrencyStamp is null) return;
+        _busy = true; _error = null;
+        try
+        {
+            var product = await Products.SetArchivedAsync(Id, Form.ConcurrencyStamp, !_archived, CancellationToken.None);
+            Form = ProductForm.From(product); _archived = product.IsArchived;
+            Navigation.NavigateTo($"/products/{Id}/details", true);
+        }
+        catch (Exception exception) { _error = exception.Message; }
+        finally { _busy = false; }
+    }
+}

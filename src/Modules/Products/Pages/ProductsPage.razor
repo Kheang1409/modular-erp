@@ -1,0 +1,59 @@
+@page "/products"
+@attribute [Authorize(Policy = ProductsPermissions.Read)]
+@inject IProductService Products
+@inject NavigationManager Navigation
+
+<PageTitle>Products</PageTitle>
+<article class="card contacts-card entity-page">
+    <div class="page-heading">
+        <div><p class="eyebrow">Product master</p><h1>Products and services</h1><p class="muted">One clean catalog for selling, buying, stocking, and reporting.</p></div>
+        <a class="button" href="/products/new"><span aria-hidden="true">＋</span> New product</a>
+    </div>
+
+    <EditForm Model="this" OnSubmit="SearchAsync" FormName="product-search" class="filter-bar">
+        <label class="filter-search"><span>Search products</span><InputText @bind-Value="Search" placeholder="Name, SKU, barcode, or description" /></label>
+        <label><span>Type</span><InputSelect @bind-Value="_type"><option value="">All types</option><option value="Product">Products</option><option value="Service">Services</option></InputSelect></label>
+        <label><span>Sort by</span><InputSelect @bind-Value="Sort"><option value="name">Name</option><option value="sku">SKU</option><option value="price">Price</option><option value="updated">Recently updated</option></InputSelect></label>
+        <label class="checkbox-field compact"><InputCheckbox @bind-Value="IncludeArchived" /><span>Show archived</span></label>
+        <button type="submit">Apply filters</button>
+    </EditForm>
+
+    @if (_loading) { <div class="loading-state" role="status">Loading products…</div> }
+    else if (_error is not null) { <div class="notice notice-error" role="alert">@_error</div> }
+    else if (_page is null || _page.Items.Count == 0)
+    {
+        <div class="empty-state"><span class="empty-state-icon" aria-hidden="true">□</span><h2>No products found</h2><p>Adjust the filters or create the first catalog item.</p><a class="button" href="/products/new">Create product</a></div>
+    }
+    else
+    {
+        <div class="list-meta"><strong>@_page.Total product@(_page.Total == 1 ? "" : "s")</strong><span>Showing @_page.Items.Count on page @_page.Page</span></div>
+        <div class="table-scroll" tabindex="0"><table class="data-table"><thead><tr><th scope="col">Product</th><th scope="col">Type</th><th scope="col" class="numeric">Sale price</th><th scope="col">Inventory</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+            <tbody>@foreach (var product in _page.Items) { <tr><td data-label="Product"><a class="entity-link" href="@($"/products/{product.Id}/details")"><strong>@product.Name</strong><span>@product.Sku</span></a></td><td data-label="Type">@product.Type</td><td data-label="Sale price" class="numeric"><strong>@product.SalePrice.ToString("N2")</strong> <span class="muted">@product.CurrencyCode</span></td><td data-label="Inventory">@(product.TracksInventory ? "Tracked" : "Not tracked")</td><td data-label="Status"><span class="status-badge @(product.IsArchived ? "is-neutral" : "is-success")">@(product.IsArchived ? "Archived" : "Active")</span></td><td class="row-action"><a class="button button-secondary button-small" href="@($"/products/{product.Id}/details")">View</a></td></tr> }</tbody>
+        </table></div>
+        <div class="list-footer">
+            <nav aria-label="Product pages" class="pager">
+                <a class="button button-secondary button-small @(EffectivePage <= 1 ? "is-disabled" : null)" aria-disabled="@(EffectivePage <= 1)" href="@(EffectivePage > 1 ? PageUrl(EffectivePage - 1) : null)">Previous</a>
+                <span>Page @EffectivePage of @TotalPages</span>
+                <a class="button button-secondary button-small @(EffectivePage >= TotalPages ? "is-disabled" : null)" aria-disabled="@(EffectivePage >= TotalPages)" href="@(EffectivePage < TotalPages ? PageUrl(EffectivePage + 1) : null)">Next</a>
+            </nav>
+            <a class="button button-secondary button-small" href="/api/v1/products/export">Export CSV</a>
+        </div>
+    }
+</article>
+
+@code {
+    [SupplyParameterFromQuery] public string? Search { get; set; }
+    [SupplyParameterFromQuery(Name = "type")] public string? TypeQuery { get; set; }
+    [SupplyParameterFromQuery] public bool IncludeArchived { get; set; }
+    [SupplyParameterFromQuery] public string? Sort { get; set; } = "name";
+    [SupplyParameterFromQuery] public int Page { get; set; } = 1;
+    private ProductPage? _page; private ProductType? _type; private bool _loading; private string? _error;
+    private static readonly string[] AllowedSorts = ["name", "sku", "price", "created", "updated"];
+    private int EffectivePage => Math.Max(1, Page);
+    private string EffectiveSort => AllowedSorts.Contains(Sort, StringComparer.OrdinalIgnoreCase) ? Sort! : "name";
+    private int TotalPages => Math.Max(1, (int)Math.Ceiling((_page?.Total ?? 0) / (double)(_page?.PageSize ?? 25)));
+    protected override Task OnParametersSetAsync() { Search = string.IsNullOrWhiteSpace(Search) ? null : Search.Trim(); _type = Enum.TryParse<ProductType>(TypeQuery?.Trim(), true, out var type) ? type : null; Sort = EffectiveSort; return LoadAsync(); }
+    private async Task SearchAsync() { var url = $"/products?page=1&search={Uri.EscapeDataString(Search ?? string.Empty)}&type={_type}&includeArchived={IncludeArchived}&sort={EffectiveSort}"; Navigation.NavigateTo(url); await Task.CompletedTask; }
+    private async Task LoadAsync() { _loading = true; _error = null; try { _page = await Products.SearchAsync(new(Search, _type, IncludeArchived, Sort: EffectiveSort, Page: EffectivePage), CancellationToken.None); } catch (ProductValidationException ex) { _error = string.Join(" ", ex.Errors.Values.SelectMany(messages => messages)); } catch (Exception ex) { _error = ex.Message; } finally { _loading = false; } }
+    private string PageUrl(int page) => $"/products?page={page}&search={Uri.EscapeDataString(Search ?? string.Empty)}&type={_type}&includeArchived={IncludeArchived}&sort={EffectiveSort}";
+}

@@ -1,0 +1,139 @@
+<EditForm Model="Model" OnValidSubmit="SubmitAsync" FormName="@FormName" class="entity-form">
+    <DataAnnotationsValidator />
+
+    @if (ServerErrors.Count > 0)
+    {
+        <div class="notice notice-error" role="alert" aria-live="assertive">
+            <strong>Please review the highlighted product details.</strong>
+            <ul>
+                @foreach (var message in ServerErrors.Values.SelectMany(messages => messages).Distinct())
+                {
+                    <li>@message</li>
+                }
+            </ul>
+        </div>
+    }
+    else if (!string.IsNullOrWhiteSpace(Error))
+    {
+        <div class="notice notice-error" role="alert">@Error</div>
+    }
+
+    <section class="form-section" aria-labelledby="product-identity-heading">
+        <div class="form-section-heading">
+            <div><p class="eyebrow">Basics</p><h2 id="product-identity-heading">Product identity</h2></div>
+            <span class="required-note"><span aria-hidden="true">*</span> Required fields</span>
+        </div>
+        <div class="form-grid">
+            <label>Type <span class="required-marker" aria-hidden="true">*</span>
+                <InputSelect @bind-Value="Model.Type" @bind-Value:after="TypeChanged">
+                    <option value="Product">Physical product</option>
+                    <option value="Service">Service</option>
+                </InputSelect>
+            </label>
+            <label>SKU <span class="required-marker" aria-hidden="true">*</span>
+                <InputText @bind-Value="Model.Sku" placeholder="e.g. PROD-001" maxlength="100" />
+                <ValidationMessage For="@(() => Model.Sku)" />
+                @FieldError("sku")
+            </label>
+            <label class="wide">Name <span class="required-marker" aria-hidden="true">*</span>
+                <InputText @bind-Value="Model.Name" placeholder="Customer-facing product name" maxlength="200" />
+                <ValidationMessage For="@(() => Model.Name)" />
+                @FieldError("name")
+            </label>
+            <label class="wide">Description
+                <InputTextArea @bind-Value="Model.Description" placeholder="Optional purchasing, sales, or fulfillment notes" maxlength="4000" />
+                <ValidationMessage For="@(() => Model.Description)" />
+                @FieldError("description")
+            </label>
+            <label>Barcode
+                <InputText @bind-Value="Model.Barcode" placeholder="Optional UPC, EAN, or internal code" maxlength="100" />
+                <ValidationMessage For="@(() => Model.Barcode)" />
+                @FieldError("barcode")
+            </label>
+            <label class="checkbox-field @(Model.Type == ProductType.Service ? "is-disabled" : null)">
+                <InputCheckbox @bind-Value="Model.TracksInventory" disabled="@(Model.Type == ProductType.Service)" />
+                <span><strong>Track inventory</strong><small>Maintain on-hand quantities and stock movements.</small></span>
+                <ValidationMessage For="@(() => Model.TracksInventory)" />
+                @FieldError("tracksInventory")
+            </label>
+        </div>
+    </section>
+
+    <section class="form-section" aria-labelledby="product-commerce-heading">
+        <div class="form-section-heading"><div><p class="eyebrow">Commerce</p><h2 id="product-commerce-heading">Pricing and units</h2></div></div>
+        <div class="form-grid form-grid-three">
+            <label>Sale price
+                <div class="input-affix"><span>@Model.CurrencyCode</span><InputNumber @bind-Value="Model.SalePrice" min="0" step="0.0001" /></div>
+                <ValidationMessage For="@(() => Model.SalePrice)" />
+                @FieldError("salePrice")
+            </label>
+            <label>Cost
+                <div class="input-affix"><span>@Model.CurrencyCode</span><InputNumber @bind-Value="Model.Cost" min="0" step="0.0001" /></div>
+                <ValidationMessage For="@(() => Model.Cost)" />
+                @FieldError("cost")
+            </label>
+            <label>Currency <span class="required-marker" aria-hidden="true">*</span>
+                <InputSelect @bind-Value="Model.CurrencyCode">
+                    @foreach (var currency in Options.Currencies)
+                    {
+                        <option value="@currency.Code">@currency.Code — @currency.Name</option>
+                    }
+                </InputSelect>
+                <ValidationMessage For="@(() => Model.CurrencyCode)" />
+                @FieldError("currencyCode")
+            </label>
+            <label>Sales unit <span class="required-marker" aria-hidden="true">*</span>
+                <InputSelect @bind-Value="Model.SalesUnitCode">
+                    @foreach (var unit in Options.Units)
+                    {
+                        <option value="@unit.Code">@unit.Name (@unit.Code)</option>
+                    }
+                </InputSelect>
+                <ValidationMessage For="@(() => Model.SalesUnitCode)" />
+                @FieldError("salesUnitCode")
+            </label>
+            <label>Purchase unit <span class="required-marker" aria-hidden="true">*</span>
+                <InputSelect @bind-Value="Model.PurchaseUnitCode">
+                    @foreach (var unit in Options.Units)
+                    {
+                        <option value="@unit.Code">@unit.Name (@unit.Code)</option>
+                    }
+                </InputSelect>
+                <ValidationMessage For="@(() => Model.PurchaseUnitCode)" />
+                @FieldError("purchaseUnitCode")
+            </label>
+        </div>
+    </section>
+
+    <ValidationSummary class="validation-summary" />
+    <div class="form-actions">
+        <button type="submit" disabled="@Busy"><span aria-hidden="true">@(Busy ? "↻" : "✓")</span>@(Busy ? "Saving…" : SubmitText)</button>
+        <a class="button button-secondary" href="/products">Cancel</a>
+    </div>
+</EditForm>
+
+@code {
+    [Parameter, EditorRequired] public ProductForm Model { get; set; } = new();
+    [Parameter, EditorRequired] public ProductOptions Options { get; set; } = new("USD", [], []);
+    [Parameter, EditorRequired] public EventCallback OnSubmit { get; set; }
+    [Parameter] public string FormName { get; set; } = "product";
+    [Parameter] public string SubmitText { get; set; } = "Save product";
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public string? Error { get; set; }
+    [Parameter] public IReadOnlyDictionary<string, string[]> ServerErrors { get; set; } = new Dictionary<string, string[]>();
+
+    private Task SubmitAsync() => OnSubmit.InvokeAsync();
+    private void TypeChanged() { if (Model.Type == ProductType.Service) Model.TracksInventory = false; }
+    private RenderFragment FieldError(string key) => builder =>
+    {
+        if (!ServerErrors.TryGetValue(key, out var messages)) return;
+        foreach (var message in messages)
+        {
+            builder.OpenElement(0, "span");
+            builder.AddAttribute(1, "class", "validation-message");
+            builder.AddAttribute(2, "role", "alert");
+            builder.AddContent(3, message);
+            builder.CloseElement();
+        }
+    };
+}

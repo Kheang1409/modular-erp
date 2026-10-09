@@ -1,0 +1,54 @@
+@page "/products/new"
+@attribute [Authorize(Policy = ProductsPermissions.Manage)]
+@inject IProductService Products
+@inject NavigationManager Navigation
+
+<PageTitle>New product</PageTitle>
+<article class="card contacts-card entity-page">
+    <div class="page-heading">
+        <div><p class="eyebrow">Product master</p><h1>New product or service</h1><p class="muted">Create a reusable item for sales, purchasing, inventory, and reporting.</p></div>
+        <a class="button button-secondary" href="/products">Back to products</a>
+    </div>
+    @if (_loading) { <div class="loading-state" role="status">Loading company settings…</div> }
+    else if (_options is not null)
+    {
+        <ProductEditor Model="Form" Options="_options" OnSubmit="SaveAsync" Busy="_busy" Error="@_error" ServerErrors="_serverErrors" />
+    }
+</article>
+
+@code {
+    private ProductForm Form { get; } = new();
+    private ProductOptions? _options;
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+    private IReadOnlyDictionary<string, string[]> _serverErrors = new Dictionary<string, string[]>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _options = await Products.GetOptionsAsync(CancellationToken.None);
+            Form.CurrencyCode = _options.BaseCurrencyCode;
+            Form.SalesUnitCode = _options.Units.FirstOrDefault()?.Code ?? "EA";
+            Form.PurchaseUnitCode = Form.SalesUnitCode;
+            if (_options.Currencies.Count == 0 || _options.Units.Count == 0)
+                _error = "Products require at least one active company currency and unit of measure.";
+        }
+        catch (Exception exception) { _error = exception.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true; _error = null; _serverErrors = new Dictionary<string, string[]>();
+        try
+        {
+            var product = await Products.CreateAsync(Form.ToRequest(), CancellationToken.None);
+            Navigation.NavigateTo($"/products/{product.Id}/details");
+        }
+        catch (ProductValidationException exception) { _serverErrors = exception.Errors; }
+        catch (Exception exception) { _error = exception.Message; }
+        finally { _busy = false; }
+    }
+}

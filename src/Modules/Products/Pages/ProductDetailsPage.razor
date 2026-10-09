@@ -1,0 +1,27 @@
+@page "/products/{Id:guid}/details"
+@attribute [Authorize(Policy = ProductsPermissions.Read)]
+@inject IProductService Products
+
+<PageTitle>Product details</PageTitle>
+<article class="card contacts-card entity-page">
+    @if (_loading) { <div class="loading-state" role="status">Loading product…</div> }
+    else if (_product is null) { <div class="empty-state"><h1>Product not found</h1><a href="/products">Return to products</a></div> }
+    else
+    {
+        <div class="page-heading">
+            <div><div class="heading-badges"><span class="status-badge is-neutral">@_product.Type</span><span class="status-badge @(_product.IsArchived ? "is-neutral" : "is-success")">@(_product.IsArchived ? "Archived" : "Active")</span></div><h1>@_product.Name</h1><p class="muted">@_product.Sku</p></div>
+            <div class="heading-actions"><a class="button button-secondary" href="/products">Back</a><a class="button" href="@($"/products/{Id}")">Edit product</a></div>
+        </div>
+        <div class="detail-grid">
+            <section class="detail-panel"><p class="eyebrow">Catalog</p><h2>Product information</h2><dl class="details"><dt>SKU</dt><dd>@_product.Sku</dd><dt>Barcode</dt><dd>@(_product.Barcode ?? "—")</dd><dt>Type</dt><dd>@_product.Type</dd><dt>Inventory</dt><dd>@(_product.TracksInventory ? "Tracked" : "Not tracked")</dd></dl></section>
+            <section class="detail-panel"><p class="eyebrow">Commerce</p><h2>Pricing and units</h2><dl class="details"><dt>Sale price</dt><dd>@_product.SalePrice.ToString("N2") @_product.CurrencyCode</dd><dt>Cost</dt><dd>@_product.Cost.ToString("N2") @_product.CurrencyCode</dd><dt>Sales unit</dt><dd>@_product.SalesUnitCode</dd><dt>Purchase unit</dt><dd>@_product.PurchaseUnitCode</dd></dl></section>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(_product.Description)) { <section class="detail-panel description-panel"><p class="eyebrow">Description</p><p>@_product.Description</p></section> }
+    }
+</article>
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+    private ProductDto? _product; private bool _loading = true;
+    protected override async Task OnParametersSetAsync() { _loading = true; _product = await Products.GetAsync(Id, CancellationToken.None); _loading = false; }
+}
