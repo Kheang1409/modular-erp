@@ -1,0 +1,10 @@
+@page "/community.modulename"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = ModuleNamePermissions.Read)]
+@inject ModuleNameService Service
+
+<PageTitle>ModuleName</PageTitle>
+
+<article class="card">
+    <h1>ModuleName</h1>
+    <p>@Service.GetMessage()</p>
+</article>

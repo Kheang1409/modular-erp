@@ -1,0 +1,11 @@
+{
+  "id": "community.hello",
+  "name": "Community Hello",
+  "version": "0.1.0",
+  "description": "An installable reference module built only against the public ERP module contract.",
+  "author": "Open ERP Community",
+  "license": "Apache-2.0",
+  "minPlatformVersion": "0.1.0",
+  "dependencies": [],
+  "permissions": ["community.hello.read"]
+}

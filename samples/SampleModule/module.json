@@ -1,0 +1,11 @@
+{
+  "id": "erp.sample",
+  "name": "Sample",
+  "version": "0.1.0",
+  "description": "Proves the public ERP module contracts.",
+  "author": "ERP Community",
+  "license": "Apache-2.0",
+  "minPlatformVersion": "0.1.0",
+  "dependencies": [],
+  "permissions": ["sample.read", "sample.events.publish"]
+}

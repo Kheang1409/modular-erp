@@ -1,0 +1,11 @@
+{
+  "id": "community.modulename",
+  "name": "ModuleName",
+  "version": "0.1.0",
+  "description": "A community Open ERP module.",
+  "author": "Community",
+  "license": "Apache-2.0",
+  "minPlatformVersion": "0.1.0",
+  "dependencies": [],
+  "permissions": ["community.modulename.read"]
+}

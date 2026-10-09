@@ -1,0 +1,10 @@
+@page "/community/hello"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = CommunityHelloPermissions.Read)]
+@inject CommunityHelloService Service
+
+<PageTitle>Community Hello</PageTitle>
+
+<article class="card">
+    <h1>Community Hello</h1>
+    <p>@Service.GetMessage()</p>
+</article>

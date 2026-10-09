@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Open ERP Community",
+  "classifications": ["ERP", "Modular", "Razor"],
+  "identity": "OpenErp.ModuleSdk.CSharp",
+  "name": "Open ERP module",
+  "shortName": "erp-module",
+  "sourceName": "ModuleName",
+  "defaultName": "MyModule",
+  "preferNameDirectory": true,
+  "symbols": {
+    "ModuleId": {
+      "type": "parameter",
+      "datatype": "text",
+      "defaultValue": "community.modulename",
+      "replaces": "community.modulename",
+      "description": "Stable lowercase dot-qualified module ID"
+    },
+    "AbstractionsProject": {
+      "type": "parameter",
+      "datatype": "text",
+      "defaultValue": "..\\..\\src\\Platform\\Erp.Abstractions\\Erp.Abstractions.csproj",
+      "replaces": "ERP_ABSTRACTIONS_PROJECT",
+      "description": "Path to Erp.Abstractions.csproj"
+    }
+  },
+  "primaryOutputs": [
+    { "path": "ModuleName.csproj" },
+    { "path": "module.json" }
+  ]
+}

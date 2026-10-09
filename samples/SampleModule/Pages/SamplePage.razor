@@ -1,0 +1,12 @@
+@page "/sample"
+@attribute [Authorize(Policy = SamplePermissions.Read)]
+@inject SampleGreetingService Greeting
+
+<PageTitle>Sample module</PageTitle>
+
+<article class="card">
+    <p class="eyebrow">Installed module</p>
+    <h1>SampleModule</h1>
+    <p>@Greeting.GetMessage()</p>
+    <p class="muted">Its page, API, permission, navigation, and service are registered without kernel changes.</p>
+</article>
