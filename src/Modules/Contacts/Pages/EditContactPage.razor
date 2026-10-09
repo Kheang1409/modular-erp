@@ -1,0 +1,67 @@
+@page "/contacts/{Id:guid}"
+@attribute [Authorize(Policy = ContactsPermissions.Manage)]
+@inject IContactService Contacts
+@inject NavigationManager Navigation
+
+<PageTitle>Edit contact</PageTitle>
+<article class="card">
+    <p class="eyebrow">Contacts</p><h1>Edit contact</h1>
+    @if (_notFound) { <p class="error">Contact not found.</p> }
+    else
+    {
+        @if (_error is not null) { <p class="error">@_error</p> }
+        <EditForm Model="CurrentForm" FormName="edit-contact" OnValidSubmit="SaveAsync" class="contact-form">
+            <AntiforgeryToken />
+            <input type="hidden" name="Form.ConcurrencyStamp" value="@CurrentForm.ConcurrencyStamp" />
+            <label>Kind <InputSelect @bind-Value="CurrentForm.Kind"><option value="Person">Person</option><option value="Organization">Organization</option></InputSelect></label>
+            <label>Display name <InputText @bind-Value="CurrentForm.DisplayName" maxlength="200" /></label>
+            <label>First name <InputText @bind-Value="CurrentForm.FirstName" maxlength="100" /></label>
+            <label>Last name <InputText @bind-Value="CurrentForm.LastName" maxlength="100" /></label>
+            <label>Organization <InputText @bind-Value="CurrentForm.OrganizationName" maxlength="200" /></label>
+            <label>Legal name <InputText @bind-Value="CurrentForm.LegalName" maxlength="200" /></label>
+            <label><InputCheckbox @bind-Value="CurrentForm.IsCustomer" /> Customer</label>
+            <label><InputCheckbox @bind-Value="CurrentForm.IsSupplier" /> Supplier</label>
+            <label>Email <InputText @bind-Value="CurrentForm.Email" maxlength="254" /></label>
+            <label>Alternate email <InputText @bind-Value="CurrentForm.AlternateEmail" maxlength="254" /></label>
+            <label>Phone <InputText @bind-Value="CurrentForm.Phone" maxlength="50" /></label>
+            <label>Alternate phone <InputText @bind-Value="CurrentForm.AlternatePhone" maxlength="50" /></label>
+            <label>Website <InputText @bind-Value="CurrentForm.Website" maxlength="500" /></label>
+            <label>Tax number <InputText @bind-Value="CurrentForm.TaxNumber" maxlength="100" /></label>
+            <label>Notes <InputTextArea @bind-Value="CurrentForm.Notes" maxlength="4000" /></label>
+            <fieldset><legend>Billing address</legend><label>Address <InputText @bind-Value="CurrentForm.BillingLine1" maxlength="200" /></label><label>City <InputText @bind-Value="CurrentForm.BillingCity" maxlength="100" /></label><label>Country code <InputText @bind-Value="CurrentForm.BillingCountryCode" maxlength="2" /></label></fieldset>
+            <fieldset><legend>Shipping address</legend><label>Address <InputText @bind-Value="CurrentForm.ShippingLine1" maxlength="200" /></label><label>City <InputText @bind-Value="CurrentForm.ShippingCity" maxlength="100" /></label><label>Country code <InputText @bind-Value="CurrentForm.ShippingCountryCode" maxlength="2" /></label></fieldset>
+            <button type="submit">Save changes</button>
+        </EditForm>
+        <EditForm Model="CurrentLifecycle" FormName="contact-lifecycle" OnValidSubmit="ChangeLifecycleAsync">
+            <AntiforgeryToken /><input type="hidden" name="Lifecycle.ConcurrencyStamp" value="@CurrentForm.ConcurrencyStamp" />
+            <input type="hidden" name="Lifecycle.IsArchived" value="@_archived" />
+            <button type="submit" onclick="return confirm('Confirm this contact status change?')">@(_archived ? "Reactivate" : "Archive")</button>
+        </EditForm>
+    }
+</article>
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+    [SupplyParameterFromForm(FormName = "edit-contact")] public ContactForm? Form { get; set; }
+    [SupplyParameterFromForm(FormName = "contact-lifecycle")] public LifecycleForm? Lifecycle { get; set; }
+    private ContactForm CurrentForm => Form ??= new();
+    private LifecycleForm CurrentLifecycle => Lifecycle ??= new();
+    private bool _archived; private bool _notFound; private string? _error;
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!string.IsNullOrEmpty(Form?.ConcurrencyStamp) || !string.IsNullOrEmpty(Lifecycle?.ConcurrencyStamp)) return;
+        var contact = await Contacts.GetAsync(Id, CancellationToken.None);
+        if (contact is null) { _notFound = true; return; }
+        Form = ContactForm.From(contact); _archived = contact.IsArchived;
+    }
+    private async Task SaveAsync()
+    {
+        try { Form = ContactForm.From(await Contacts.UpdateAsync(Id, CurrentForm.ToRequest(), CancellationToken.None)); }
+        catch (Exception exception) when (exception is ContactValidationException or ContactConcurrencyException) { _error = exception.Message; }
+    }
+    private async Task ChangeLifecycleAsync()
+    {
+        try { var contact = await Contacts.SetArchivedAsync(Id, CurrentLifecycle.ConcurrencyStamp!, !CurrentLifecycle.IsArchived, CancellationToken.None); Navigation.NavigateTo($"/contacts/{contact.Id}", forceLoad: true); }
+        catch (ContactConcurrencyException exception) { _error = exception.Message; }
+    }
+}

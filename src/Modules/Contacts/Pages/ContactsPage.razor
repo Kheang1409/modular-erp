@@ -1,0 +1,55 @@
+@page "/contacts"
+@attribute [Authorize(Policy = ContactsPermissions.Read)]
+@inject IContactService Contacts
+
+<PageTitle>Contacts</PageTitle>
+<article class="card contacts-card">
+    <p class="eyebrow">Master data</p>
+    <h1>Contacts</h1>
+    <p class="muted">Customers, suppliers, people, and organizations remain isolated to the active company.</p>
+    <p><a class="button" href="/contacts/new">New contact</a></p>
+    <form method="get" class="contact-search">
+        <label>Search <input name="search" value="@Search" maxlength="200" /></label>
+        <label>Kind
+            <select name="kind">
+                <option value="">All</option>
+                <option value="Person" selected="@(SelectedKind == ContactKind.Person)">People</option>
+                <option value="Organization" selected="@(SelectedKind == ContactKind.Organization)">Organizations</option>
+            </select>
+        </label>
+        <label><input type="checkbox" name="includeArchived" value="true" checked="@IncludeArchived" /> Include archived</label>
+        <label><input type="checkbox" name="isCustomer" value="true" checked="@(IsCustomer == true)" /> Customers</label>
+        <label><input type="checkbox" name="isSupplier" value="true" checked="@(IsSupplier == true)" /> Suppliers</label>
+        <button type="submit">Filter</button>
+    </form>
+    @if (_page is null) { <p>Loading contacts…</p> }
+    else if (_page.Items.Count == 0) { <p class="muted">No contacts match this view.</p> }
+    else
+    {
+        <div class="table-scroll" tabindex="0"><table>
+            <thead><tr><th>Name</th><th>Kind</th><th>Email</th><th>Phone</th><th>Status</th></tr></thead>
+            <tbody>@foreach (var contact in _page.Items) { <tr><td><a href="@($"/contacts/{contact.Id}/details")">@contact.DisplayName</a></td><td>@contact.Kind</td><td>@contact.Email</td><td>@contact.Phone</td><td>@(contact.IsArchived ? "Archived" : "Active")</td></tr> }</tbody>
+        </table></div>
+        <p class="muted">Page @_page.Page · showing @(_page.Items.Count) of @_page.Total contacts.</p>
+        <nav aria-label="Contact pages" class="pager">
+            @if (_page.Page > 1) { <a class="button" href="@PageUrl(_page.Page - 1)">Previous</a> }
+            @if (_page.Page * _page.PageSize < _page.Total) { <a class="button" href="@PageUrl(_page.Page + 1)">Next</a> }
+        </nav>
+    }
+    <p><a class="button" href="/api/v1/contacts/export">Export CSV</a></p>
+</article>
+
+@code {
+    [SupplyParameterFromQuery] public string? Search { get; set; }
+    [SupplyParameterFromQuery(Name = "kind")] public string? KindQuery { get; set; }
+    [SupplyParameterFromQuery] public bool IncludeArchived { get; set; }
+    [SupplyParameterFromQuery] public bool? IsCustomer { get; set; }
+    [SupplyParameterFromQuery] public bool? IsSupplier { get; set; }
+    [SupplyParameterFromQuery] public int Page { get; set; } = 1;
+    private ContactPage? _page;
+    private int EffectivePage => Math.Max(1, Page);
+    private ContactKind? SelectedKind => Enum.TryParse<ContactKind>(KindQuery, true, out var kind) ? kind : null;
+    protected override async Task OnParametersSetAsync() =>
+        _page = await Contacts.SearchAsync(new(Search, SelectedKind, IncludeArchived, Page: EffectivePage, IsCustomer: IsCustomer, IsSupplier: IsSupplier), CancellationToken.None);
+    private string PageUrl(int page) => $"/contacts?page={page}&search={Uri.EscapeDataString(Search ?? string.Empty)}&kind={SelectedKind}&includeArchived={IncludeArchived}&isCustomer={IsCustomer}&isSupplier={IsSupplier}";
+}

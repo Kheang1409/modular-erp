@@ -1,0 +1,42 @@
+@page "/contacts/new"
+@attribute [Authorize(Policy = ContactsPermissions.Manage)]
+@inject IContactService Contacts
+@inject NavigationManager Navigation
+
+<PageTitle>New contact</PageTitle>
+<article class="card">
+    <p class="eyebrow">Contacts</p><h1>New contact</h1>
+    @if (_error is not null) { <p class="error">@_error</p> }
+    <EditForm Model="CurrentForm" FormName="new-contact" OnValidSubmit="SaveAsync" class="contact-form">
+        <AntiforgeryToken />
+        <label>Kind <InputSelect @bind-Value="CurrentForm.Kind"><option value="Person">Person</option><option value="Organization">Organization</option></InputSelect></label>
+        <label>Display name <InputText @bind-Value="CurrentForm.DisplayName" maxlength="200" /></label>
+        <label>First name <InputText @bind-Value="CurrentForm.FirstName" maxlength="100" /></label>
+        <label>Last name <InputText @bind-Value="CurrentForm.LastName" maxlength="100" /></label>
+        <label>Organization <InputText @bind-Value="CurrentForm.OrganizationName" maxlength="200" /></label>
+        <label>Legal name <InputText @bind-Value="CurrentForm.LegalName" maxlength="200" /></label>
+        <label><InputCheckbox @bind-Value="CurrentForm.IsCustomer" /> Customer</label>
+        <label><InputCheckbox @bind-Value="CurrentForm.IsSupplier" /> Supplier</label>
+        <label>Email <InputText @bind-Value="CurrentForm.Email" maxlength="254" /></label>
+        <label>Alternate email <InputText @bind-Value="CurrentForm.AlternateEmail" maxlength="254" /></label>
+        <label>Phone <InputText @bind-Value="CurrentForm.Phone" maxlength="50" /></label>
+        <label>Alternate phone <InputText @bind-Value="CurrentForm.AlternatePhone" maxlength="50" /></label>
+        <label>Website <InputText @bind-Value="CurrentForm.Website" maxlength="500" /></label>
+        <label>Tax number <InputText @bind-Value="CurrentForm.TaxNumber" maxlength="100" /></label>
+        <label>Notes <InputTextArea @bind-Value="CurrentForm.Notes" maxlength="4000" /></label>
+        <fieldset><legend>Billing address</legend><label>Address <InputText @bind-Value="CurrentForm.BillingLine1" maxlength="200" /></label><label>City <InputText @bind-Value="CurrentForm.BillingCity" maxlength="100" /></label><label>Country code <InputText @bind-Value="CurrentForm.BillingCountryCode" maxlength="2" /></label></fieldset>
+        <fieldset><legend>Shipping address</legend><label>Address <InputText @bind-Value="CurrentForm.ShippingLine1" maxlength="200" /></label><label>City <InputText @bind-Value="CurrentForm.ShippingCity" maxlength="100" /></label><label>Country code <InputText @bind-Value="CurrentForm.ShippingCountryCode" maxlength="2" /></label></fieldset>
+        <button type="submit">Create contact</button>
+    </EditForm>
+</article>
+
+@code {
+    [SupplyParameterFromForm(FormName = "new-contact")] public ContactForm? Form { get; set; }
+    private ContactForm CurrentForm => Form ??= new();
+    private string? _error;
+    private async Task SaveAsync()
+    {
+        try { var contact = await Contacts.CreateAsync(CurrentForm.ToRequest(), CancellationToken.None); Navigation.NavigateTo($"/contacts/{contact.Id}"); }
+        catch (ContactValidationException exception) { _error = string.Join(" ", exception.Errors.SelectMany(x => x.Value)); }
+    }
+}

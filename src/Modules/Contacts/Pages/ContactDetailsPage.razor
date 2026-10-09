@@ -1,0 +1,42 @@
+@page "/contacts/{Id:guid}/details"
+@attribute [Authorize(Policy = ContactsPermissions.Read)]
+@inject IContactService Contacts
+
+<PageTitle>Contact details</PageTitle>
+<article class="card">
+    @if (_contact is null)
+    {
+        <h1>Contact not found</h1>
+    }
+    else
+    {
+        <p class="eyebrow">@(_contact.IsArchived ? "Archived contact" : "Active contact")</p>
+        <h1>@_contact.DisplayName</h1>
+        <dl class="details">
+            <dt>Type</dt><dd>@_contact.Kind</dd>
+            <dt>Roles</dt><dd>@Roles</dd>
+            <dt>Legal name</dt><dd>@(_contact.LegalName ?? "—")</dd>
+            <dt>Email</dt><dd>@(_contact.Email ?? "—")</dd>
+            <dt>Other emails</dt><dd>@JoinEmails()</dd>
+            <dt>Phone</dt><dd>@(_contact.Phone ?? "—")</dd>
+            <dt>Other phones</dt><dd>@JoinPhones()</dd>
+            <dt>Website</dt><dd>@(_contact.Website ?? "—")</dd>
+            <dt>Billing address</dt><dd>@Address(_contact.BillingAddress)</dd>
+            <dt>Shipping address</dt><dd>@Address(_contact.ShippingAddress)</dd>
+            <dt>Updated</dt><dd>@_contact.UpdatedAtUtc.ToString("u")</dd>
+        </dl>
+        <p><a class="button" href="@($"/contacts/{Id}")">Edit contact</a> <a href="/contacts">Back to contacts</a></p>
+    }
+</article>
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+    private ContactDto? _contact;
+    private string Roles => ContactRoleText.Describe(_contact?.IsCustomer ?? false, _contact?.IsSupplier ?? false);
+    protected override async Task OnParametersSetAsync() => _contact = await Contacts.GetAsync(Id, CancellationToken.None);
+    private static string Address(ContactAddressRequest? address) => address is null ? "—" :
+        string.Join(", ", new[] { address.Line1, address.Line2, address.City, address.StateOrProvince, address.PostalCode, address.CountryCode }
+            .Where(value => !string.IsNullOrWhiteSpace(value)));
+    private string JoinEmails() => string.Join(", ", _contact?.EmailAddresses.Where(value => !value.IsPrimary).Select(value => value.Address) ?? []) is { Length: > 0 } value ? value : "—";
+    private string JoinPhones() => string.Join(", ", _contact?.PhoneNumbers.Where(value => !value.IsPrimary).Select(value => value.Number) ?? []) is { Length: > 0 } value ? value : "—";
+}
