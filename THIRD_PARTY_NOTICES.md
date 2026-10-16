@@ -13,3 +13,14 @@ The unmodified Bootstrap license is included at
 Bootstrap: <https://getbootstrap.com/>
 
 License source: <https://github.com/twbs/bootstrap/blob/v5.3.8/LICENSE>
+
+## Integration-test storage fixture
+
+The integration suite builds and runs MinIO from upstream revision
+`7aac2a2c5b7c882e68c1ce017d8256be2feea27f` in a disposable container.
+MinIO is licensed under AGPL-3.0; it is not bundled in the application image.
+Open ERP's Apache-2.0 license does not replace third-party licenses.
+
+Source and license:
+<https://github.com/minio/minio/tree/7aac2a2c5b7c882e68c1ce017d8256be2feea27f>
+and <https://github.com/minio/minio/blob/7aac2a2c5b7c882e68c1ce017d8256be2feea27f/LICENSE>.

@@ -41,6 +41,14 @@ Integration tests now require disposable PostgreSQL and storage containers. If
 Docker is unavailable or startup fails, the suite fails visibly instead of
 returning early and appearing successful.
 
+That stricter gate exposed an unavailable MinIO container reference on a fresh
+hosted runner, even though a cached local image still worked. The storage fixture
+now builds from a fixed upstream source revision using pinned official build and
+runtime images. It still exercises real S3 operations and remains separate from
+the application deployment. CI first warms the same BuildKit cache with visible
+build progress; tests still build their own disposable image and run the storage
+assertions. A failed source build remains a failed gate.
+
 The Accounting tests no longer accept an external database override. They always
 own a fresh disposable database, reducing the risk of accidentally running test
 writes against application data.

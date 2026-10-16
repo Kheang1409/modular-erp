@@ -89,6 +89,8 @@ dotnet format Erp.slnx --verify-no-changes --no-restore
 
 Integration tests require Docker and always create isolated PostgreSQL and S3-compatible storage containers. An unavailable Docker engine or failed container startup fails the tests; it cannot produce a passing no-op. Application connection strings and `ERP_TEST_POSTGRES_CONNECTION` overrides are not used, so the suite cannot be redirected to your application database.
 
+The storage fixture builds MinIO from a fixed upstream source revision using pinned official Go and Alpine images. The previous image reference was unavailable to fresh runners, and upstream now documents source-only community distribution. Testcontainers uses a pinned Docker CLI sidecar and the engine's BuildKit support; it does not require Go on the test host. The first run needs network access for those images and checksum-verified Go modules and can take several minutes. The build context contains only the [test Dockerfile](tests/IntegrationTests/Fixtures/Minio/Dockerfile), not application configuration or secrets. The disposable test image is cleaned up after the test; this does not install MinIO in the application.
+
 ```powershell
 dotnet test tests/IntegrationTests/Erp.IntegrationTests.csproj --no-build
 ```

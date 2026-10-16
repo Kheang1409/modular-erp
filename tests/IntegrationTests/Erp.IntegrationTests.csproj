@@ -16,7 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Testcontainers.PostgreSql" Version="4.15.0" />
+    <PackageReference Include="Testcontainers.PostgreSql" Version="4.16.0" />
     <ProjectReference Include="..\..\src\Platform\Erp.Infrastructure\Erp.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Platform\Erp.ModuleSystem\Erp.ModuleSystem.csproj" />
     <ProjectReference Include="..\..\samples\SampleModule\Erp.Modules.Sample.csproj" />
@@ -31,6 +31,7 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <None Update="Fixtures\Minio\Dockerfile" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

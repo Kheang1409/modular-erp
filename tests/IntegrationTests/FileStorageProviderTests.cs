@@ -5,6 +5,7 @@ using Amazon.S3.Model;
 using DotNet.Testcontainers.Builders;
 using Erp.Abstractions.Files;
 using Erp.Infrastructure.Files;
+using Microsoft.Extensions.Logging;
 
 namespace Erp.IntegrationTests;
 
@@ -15,8 +16,22 @@ public sealed class FileStorageProviderTests
     {
         const string accessKey = "erp_integration";
         const string secretKey = "integration_only_secret";
+        var fixtureDirectory = Path.Combine(AppContext.BaseDirectory, "Fixtures", "Minio");
+        using var buildLoggerFactory = LoggerFactory.Create(logging =>
+            logging.AddSimpleConsole(options => options.SingleLine = true).SetMinimumLevel(LogLevel.Debug));
+        await using var image = new BuildKitImageFromDockerfileBuilder(
+                "docker:29.8.1-cli@sha256:018edbc908e08fcc9dbf029c812c34251e9b4719e6f71ca0e5eae2a987d014ca")
+            .WithContextDirectory(fixtureDirectory)
+            .WithDockerfileDirectory(fixtureDirectory)
+            .WithLogger(buildLoggerFactory.CreateLogger("MinioFixtureBuild"))
+            .Build();
+        using (var buildTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(15)))
+        {
+            await image.CreateAsync(buildTimeout.Token);
+        }
+
         var container = await IntegrationContainers.StartAsync(
-            new ContainerBuilder("quay.io/minio/minio@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e")
+            new ContainerBuilder(image)
                 .WithEnvironment("MINIO_ROOT_USER", accessKey)
                 .WithEnvironment("MINIO_ROOT_PASSWORD", secretKey)
                 .WithCommand("server", "/data")
