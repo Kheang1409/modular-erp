@@ -1,5 +1,6 @@
 using System.Reflection;
 using Erp.Abstractions.Modules;
+using Erp.Abstractions.Persistence;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
@@ -20,10 +21,9 @@ public sealed class ContactsModule : IErpModule
 
     public void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
-        var connectionString = configuration.GetConnectionString("Postgres")
-            ?? throw new InvalidOperationException("ConnectionStrings:Postgres is required.");
-        services.AddDbContext<ContactsDbContext>(options => options.UseNpgsql(
-            connectionString, postgres => postgres.MigrationsHistoryTable("__EFMigrationsHistory", "contacts")));
+        services.AddDbContext<ContactsDbContext>((provider, options) => options.UseNpgsql(
+            provider.GetRequiredService<IRelationalDatabaseSession>().Connection,
+            postgres => postgres.MigrationsHistoryTable("__EFMigrationsHistory", "contacts")));
         services.AddScoped<IContactService, ContactService>();
         services.AddScoped<IContactDirectory, ContactDirectory>();
         services.AddScoped<ICustomerDocumentDirectory, CustomerDocumentDirectory>();

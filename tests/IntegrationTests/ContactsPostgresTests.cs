@@ -3,8 +3,9 @@ using Erp.Abstractions.Auditing;
 using Erp.Modules.Contacts;
 using Erp.SharedKernel;
 using Microsoft.EntityFrameworkCore;
-using Testcontainers.PostgreSql;
 using Microsoft.AspNetCore.Http;
+using Erp.Infrastructure.Persistence;
+using Npgsql;
 
 namespace Erp.IntegrationTests;
 
@@ -13,17 +14,7 @@ public sealed class ContactsPostgresTests
     [Fact]
     public async Task ContactsAreCompanyIsolatedAndConcurrencyIsEnforced()
     {
-        PostgreSqlContainer postgres;
-        try
-        {
-            postgres = new PostgreSqlBuilder("postgres:18-alpine").WithDatabase("contacts_tests")
-                .WithUsername("erp").WithPassword("integration_only_password").Build();
-            await postgres.StartAsync(CancellationToken.None);
-        }
-        catch (Exception) when (!string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
+        var postgres = await IntegrationContainers.StartPostgresAsync("contacts_tests");
         await using (postgres)
         {
             var tenant = Guid.NewGuid(); var companyA = Guid.NewGuid(); var companyB = Guid.NewGuid();
@@ -43,10 +34,16 @@ public sealed class ContactsPostgresTests
             Assert.Empty(await hidden.ContactEmails.ToListAsync());
 
             var audit = new RecordingAudit();
-            await using (var serviceContext = new ContactsDbContext(options, new TenantContext(tenant), new CompanyContext(companyA)))
+            await using var serviceConnection = new NpgsqlConnection(postgres.GetConnectionString());
+            await using var platformContext = new PlatformDbContext(
+                new DbContextOptionsBuilder<PlatformDbContext>().UseNpgsql(serviceConnection).Options,
+                new TenantContext(tenant));
+            await using (var serviceContext = new ContactsDbContext(
+                new DbContextOptionsBuilder<ContactsDbContext>().UseNpgsql(serviceConnection).Options,
+                new TenantContext(tenant), new CompanyContext(companyA)))
             {
                 var service = new ContactService(serviceContext, new TenantContext(tenant), new CompanyContext(companyA),
-                    new FixedClock(), audit, new HttpContextAccessor());
+                    new FixedClock(), audit, new HttpContextAccessor(), new BusinessTransactionCoordinator(platformContext));
                 var supplier = await service.CreateAsync(new(ContactKind.Organization, "Supplier One", null, null,
                     "Supplier One", "primary@supplier.test", null, null, null, IsSupplier: true,
                     EmailAddresses: [new("primary@supplier.test", true), new("orders@supplier.test")]), CancellationToken.None);

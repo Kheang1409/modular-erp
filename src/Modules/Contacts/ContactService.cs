@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Security.Claims;
 using Erp.Abstractions.Auditing;
 using Erp.Abstractions.Context;
+using Erp.Abstractions.Persistence;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 
@@ -24,7 +25,8 @@ public interface IContactService
 
 public sealed class ContactService(
     ContactsDbContext database, ITenantContext tenantContext, ICompanyContext companyContext,
-    IClock clock, IAuditLogWriter audit, IHttpContextAccessor httpContextAccessor) : IContactService
+    IClock clock, IAuditLogWriter audit, IHttpContextAccessor httpContextAccessor,
+    IBusinessTransactionCoordinator transactions) : IContactService
 {
     public async Task<ContactPage> SearchAsync(ContactQuery query, CancellationToken cancellationToken)
     {
@@ -67,6 +69,7 @@ public sealed class ContactService(
     public async Task<ContactDto> CreateAsync(ContactRequest request, CancellationToken cancellationToken)
     {
         var values = Validate(request);
+        await using var transaction = await transactions.BeginAsync(database, cancellationToken);
         var now = clock.UtcNow;
         var contactId = Guid.NewGuid();
         var contact = new Contact
@@ -100,13 +103,16 @@ public sealed class ContactService(
         database.Contacts.Add(contact);
         await database.SaveChangesAsync(cancellationToken);
         await AuditAsync("contacts.created", contact, null, cancellationToken);
-        return ToDto(contact);
+        var result = ToDto(contact);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     public async Task<ContactDto> UpdateAsync(Guid id, ContactRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.ConcurrencyStamp)) throw Validation("concurrencyStamp", "Concurrency stamp is required.");
         var values = Validate(request);
+        await using var transaction = await transactions.BeginAsync(database, cancellationToken);
         var contact = await database.Contacts.Include(x => x.EmailAddresses).Include(x => x.PhoneNumbers)
             .SingleOrDefaultAsync(x => x.Id == id, cancellationToken)
             ?? throw new KeyNotFoundException("Contact was not found.");
@@ -130,11 +136,14 @@ public sealed class ContactService(
         contact = await database.Contacts.Include(x => x.EmailAddresses).Include(x => x.PhoneNumbers)
             .SingleAsync(x => x.Id == id, cancellationToken);
         await AuditAsync("contacts.updated", contact, before, cancellationToken);
-        return ToDto(contact);
+        var result = ToDto(contact);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     public async Task<ContactDto> SetArchivedAsync(Guid id, string concurrencyStamp, bool archived, CancellationToken cancellationToken)
     {
+        await using var transaction = await transactions.BeginAsync(database, cancellationToken);
         var contact = await database.Contacts.SingleOrDefaultAsync(x => x.Id == id, cancellationToken)
             ?? throw new KeyNotFoundException("Contact was not found.");
         if (!StringComparer.Ordinal.Equals(contact.ConcurrencyStamp, concurrencyStamp)) throw new ContactConcurrencyException();
@@ -143,7 +152,9 @@ public sealed class ContactService(
         contact.UpdatedBy = CurrentUserId();
         await SaveWithConcurrencyAsync(cancellationToken);
         await AuditAsync(archived ? "contacts.archived" : "contacts.reactivated", contact, before, cancellationToken);
-        return ToDto(contact);
+        var result = ToDto(contact);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     public async Task<CsvImportResult> ImportCsvAsync(Stream csv, CancellationToken cancellationToken)
