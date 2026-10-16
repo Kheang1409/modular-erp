@@ -4,6 +4,11 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## 0.1.0 - unreleased
 
+- Added a shared PostgreSQL transaction coordinator and atomic Contacts business/audit writes, with rollback, nested-scope, cancellation, and retry regressions against real PostgreSQL.
+- Made integration tests fail closed when Docker or container startup is unavailable; removed the external Accounting test-database override and centralized disposable container startup.
+- Separated CI unit, architecture, integration, and browser gates and retained test-result and dashboard screenshot diagnostics on a pinned Ubuntu runner.
+- Documented the first transaction-adoption milestone, remaining release gates, and a community upgrade article without claiming production readiness.
+
 - Added tenant/company security, roles, auditing, attachments, background jobs, and transactional outbox foundations.
 - Added Contacts, Products, CRM, Sales, Purchasing, Inventory, Accounting, and Reporting modules.
 - Added trusted external-module packaging, signatures, CLI, administrative lifecycle UI, and dependency-ordered migrations.

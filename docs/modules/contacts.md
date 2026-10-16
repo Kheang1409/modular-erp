@@ -6,7 +6,7 @@ Contacts owns the `contacts` PostgreSQL schema, its EF Core context and migratio
 
 Every row carries both `TenantId` and `CompanyId`. Global query filters require both active contexts and a save guard rejects cross-tenant or cross-company writes. The module references `Erp.Abstractions` and `Contacts.Contracts`; it does not reference platform infrastructure, SampleModule, or another business module's persistence. Consuming modules store a contact identifier and resolve contact data through the public Contacts contracts rather than taking a database dependency.
 
-`Erp.Modules.Contacts.Contracts` is the supported cross-module boundary. `IContactDirectory` resolves one contact or a bounded batch of 100 using the caller's active tenant/company context. It returns immutable `ContactReference` values and never exposes EF entities. Durable Contacts events are intentionally deferred until the kernel can enlist the module-owned context and platform outbox in one PostgreSQL transaction.
+`Erp.Modules.Contacts.Contracts` is the supported cross-module boundary. `IContactDirectory` resolves one contact or a bounded batch of 100 using the caller's active tenant/company context. It returns immutable `ContactReference` values and never exposes EF entities. The module participates in the platform's shared transaction contract through public persistence abstractions, without taking an Infrastructure dependency. Versioned durable Contacts event payloads remain a separate follow-up; this upgrade does not invent or publish new Contacts events.
 
 The host discovers the module and invokes its public `IModuleDatabaseInitializer` implementation when startup migration is enabled. Production migrations can be applied explicitly:
 
@@ -28,4 +28,6 @@ CSV import recognizes `kind` and `displayName` as required headers and the optio
 
 ## Audit consistency
 
-Create, update, archive, reactivate, and each imported row write the platform audit trail with before/after JSON. The Contacts save and platform audit save use separate contexts and are not yet one atomic transaction. A shared transactional unit-of-work contract is the recommended kernel follow-up before financial modules rely on cross-context audit/outbox atomicity.
+Create, update, archive, reactivate, and each imported row write the platform audit trail with before/after JSON. `ContactsDbContext` and `PlatformDbContext` share a scoped connection and explicitly enlist in one PostgreSQL transaction through `IBusinessTransactionCoordinator`. The operation commits only after the business save and audit flush succeed. A failure or cancellation rolls both back and clears the participating trackers; pending platform outbox messages in that transaction are rolled back as well.
+
+Each valid CSV row retains its own transaction; invalid rows do not undo previously committed rows. Nested operations join the outer transaction and cannot independently commit it. An abandoned inner scope makes the outer operation rollback-only. Read operations remain unchanged, and existing tenant/company guards and optimistic concurrency continue to apply. See the [business transaction boundary](../architecture/overview.md#business-transaction-boundary) for ownership and retry limits.

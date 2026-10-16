@@ -28,6 +28,38 @@ Typed domain events are dispatched sequentially to scoped module handlers with o
 
 Versioned integration events are inserted beside business changes and leased to tenant-aware consumers by the transactional outbox publisher. See [transactional outbox](transactional-outbox.md).
 
+## Business transaction boundary
+
+`Erp.Abstractions.Persistence` defines BCL-only connection, participant, and
+transaction-scope contracts. Infrastructure owns the scoped PostgreSQL connection
+and `IBusinessTransactionCoordinator`; a module implements `ITransactionParticipant`
+using its own DbContext. Modules never access platform entities or another
+module's schema to participate.
+
+Contacts is the first adopted module. Its create, update, archive, and reactivate
+operations share one physical connection and transaction with platform audit and
+any staged outbox messages. The coordinator flushes pending platform changes
+before committing. CSV imports preserve independent transactions per valid row.
+Other writable modules retain their existing boundaries until explicitly migrated;
+this is not a system-wide atomicity claim.
+
+Nested scopes join the outer transaction. An inner commit marks that scope complete
+without committing PostgreSQL, while an incomplete inner scope makes the root
+rollback-only. A root cannot commit while a child is active. Different connections
+or unrelated local transactions are rejected rather than silently replaced.
+Root operations also reject pre-existing pending tracked changes, leaving them
+untouched instead of committing or discarding work owned by another operation.
+Rollback detaches participating transactions and clears their change trackers, even
+when the original cancellation token has been cancelled.
+If cleanup itself fails, that coordinator cannot be reused; start a fresh scope.
+
+Connections and DbContexts are scoped and must be used sequentially; do not issue
+parallel operations on a shared session. Retry a failed request with fresh scoped
+services and the operation's idempotency rules, not by transparently replaying a
+partially executed callback. A lost commit acknowledgement is an unknown outcome,
+not proof that a write failed. This boundary does not make external file/object
+storage, module-package filesystem changes, or event-consumer side effects atomic.
+
 ## Accepted architecture decisions
 
 The decision identifiers are retained here as a consolidated architecture record.

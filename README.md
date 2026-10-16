@@ -87,12 +87,10 @@ dotnet format Erp.slnx --verify-no-changes --no-restore
 
 ### Database and browser checks
 
-Integration tests normally use isolated PostgreSQL Testcontainers and an S3-compatible storage container. Keep Docker running, and leave the optional `ERP_TEST_POSTGRES_CONNECTION` override unset unless it points to a disposable test database; never point it at the application or production database. Some tests return early when containers cannot start outside CI; setting `CI=true` makes those startup failures fail the test instead of appearing successful.
+Integration tests require Docker and always create isolated PostgreSQL and S3-compatible storage containers. An unavailable Docker engine or failed container startup fails the tests; it cannot produce a passing no-op. Application connection strings and `ERP_TEST_POSTGRES_CONNECTION` overrides are not used, so the suite cannot be redirected to your application database.
 
 ```powershell
-$env:CI = "true"
 dotnet test tests/IntegrationTests/Erp.IntegrationTests.csproj --no-build
-Remove-Item Env:CI
 ```
 
 Browser tests require a running application, Chromium, and all three `ERP_E2E_*` settings. They return early if settings are missing, so an unconfigured green test run is not browser verification. After building, install Chromium and supply credentials for a dedicated test administrator:
@@ -106,7 +104,13 @@ $env:ERP_E2E_PASSWORD = "REPLACE_WITH_TEST_ADMIN_PASSWORD"
 dotnet test tests/EndToEndTests/Erp.EndToEndTests.csproj --no-build --filter "FullyQualifiedName~DashboardBrowserTests|FullyQualifiedName~FormErrorBrowserTests"
 ```
 
-Run the complete browser suite only against a disposable test environment: `CriticalWorkflowTests` creates business and administrative records. `dotnet test Erp.slnx --no-build` runs all test projects, but only verifies integration and browser behavior when their prerequisites are satisfied. The [CI workflow](.github/workflows/ci.yml) configures those prerequisites and also exercises module packaging and isolated backup/restore.
+Run the complete browser suite only against a disposable test environment: `CriticalWorkflowTests` creates business and administrative records. `dotnet test Erp.slnx --no-build` runs all test projects and requires Docker; browser verification additionally requires the settings above. The [CI workflow](.github/workflows/ci.yml) separates unit, architecture, integration, and configured browser checks, retains test diagnostics, and also exercises module packaging and isolated backup/restore.
+
+## Current milestone and next steps
+
+This is a pre-release community preview, not a production-readiness guarantee. Contacts create, update, archive, and reactivate operations now enlist their business changes and platform audit records in one PostgreSQL transaction. Each valid CSV row still commits independently. See the [transaction boundary](docs/architecture/overview.md#business-transaction-boundary) and the [upgrade article](docs/updates/reliability-and-ci-upgrade.md).
+
+Next release gates are migrating the remaining writable modules to the shared transaction boundary, completing realistic-volume performance and security checks, proving production-like restore and module-upgrade recovery, obtaining a green complete CI run, and publishing reviewed release notes and a version tag. Advanced inventory costing, lots/serials, and additional ERP modules remain separate future extensions.
 
 ## Architecture and extension points
 
