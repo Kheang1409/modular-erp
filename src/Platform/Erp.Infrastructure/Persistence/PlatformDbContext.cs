@@ -1,15 +1,31 @@
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Erp.Abstractions.Context;
+using Erp.Abstractions.Persistence;
+using System.Data.Common;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Erp.Infrastructure.Persistence;
 
 public sealed class PlatformDbContext(
     DbContextOptions<PlatformDbContext> options,
     ITenantContext? tenantContext = null)
-    : IdentityDbContext<ApplicationUser, ApplicationRole, Guid>(options)
+    : IdentityDbContext<ApplicationUser, ApplicationRole, Guid>(options), ITransactionParticipant
 {
     private readonly ITenantContext? _tenantContext = tenantContext;
+
+    DbConnection ITransactionParticipant.Connection => Database.GetDbConnection();
+    bool ITransactionParticipant.HasPendingChanges => ChangeTracker.HasChanges();
+
+    async Task ITransactionParticipant.EnlistAsync(DbTransaction? transaction, CancellationToken cancellationToken)
+    {
+        if (transaction is not null && Database.CurrentTransaction is { } current &&
+            !ReferenceEquals(current.GetDbTransaction(), transaction))
+            throw new InvalidOperationException("An unmanaged platform transaction is already active.");
+        await Database.UseTransactionAsync(transaction, cancellationToken);
+    }
+
+    void ITransactionParticipant.DiscardChanges() => ChangeTracker.Clear();
 
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<Company> Companies => Set<Company>();

@@ -24,7 +24,12 @@ public sealed partial class PostgresSequenceService(
         var companyId = companyContext.CompanyId?.Value
             ?? throw new InvalidOperationException("An active company is required to allocate a sequence number.");
 
-        await using var transaction = await database.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
+        // Join the surrounding business operation, or own a short standalone allocation.
+        await using var ownedTransaction = database.Database.CurrentTransaction is null
+            ? await database.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken)
+            : null;
+        var transaction = database.Database.CurrentTransaction
+            ?? throw new InvalidOperationException("Sequence allocation requires an active database transaction.");
         await database.Database.ExecuteSqlInterpolatedAsync(
             $"""
             INSERT INTO platform.document_sequences
@@ -35,7 +40,7 @@ public sealed partial class PostgresSequenceService(
             """,
             cancellationToken);
 
-        var definition = await database.DocumentSequences
+        var definition = await database.DocumentSequences.AsNoTracking()
             .SingleAsync(x => x.CompanyId == companyId && x.Key == request.Key, cancellationToken);
         if (!string.Equals(definition.PrefixTemplate, request.PrefixTemplate, StringComparison.Ordinal) ||
             definition.Padding != request.Padding)
@@ -59,7 +64,8 @@ public sealed partial class PostgresSequenceService(
         command.Parameters.AddWithValue("key", request.Key);
         var scalar = await command.ExecuteScalarAsync(cancellationToken);
         var number = Convert.ToInt64(scalar, CultureInfo.InvariantCulture);
-        await transaction.CommitAsync(cancellationToken);
+        if (ownedTransaction is not null)
+            await ownedTransaction.CommitAsync(cancellationToken);
 
         var prefix = request.PrefixTemplate
             .Replace("{yyyy}", request.BusinessDate.Year.ToString("D4", CultureInfo.InvariantCulture), StringComparison.Ordinal)

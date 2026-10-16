@@ -19,6 +19,7 @@ using Erp.Infrastructure.Jobs;
 using Erp.Abstractions.Events;
 using Erp.Infrastructure.Events;
 using Erp.Abstractions.Operations;
+using Erp.Abstractions.Persistence;
 using Erp.Infrastructure.Operations;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
@@ -41,7 +42,10 @@ public static class DependencyInjection
         var connectionString = configuration.GetConnectionString("Postgres")
             ?? throw new InvalidOperationException("ConnectionStrings:Postgres is required.");
 
-        services.AddDbContext<PlatformDbContext>(options => options.UseNpgsql(connectionString));
+        services.AddScoped<IRelationalDatabaseSession>(_ => new RelationalDatabaseSession(connectionString));
+        services.AddDbContext<PlatformDbContext>((serviceProvider, options) => options.UseNpgsql(
+            serviceProvider.GetRequiredService<IRelationalDatabaseSession>().Connection));
+        services.AddScoped<IBusinessTransactionCoordinator, BusinessTransactionCoordinator>();
         services.AddIdentityCore<ApplicationUser>(options =>
         {
             options.Password.RequiredLength = 12;
