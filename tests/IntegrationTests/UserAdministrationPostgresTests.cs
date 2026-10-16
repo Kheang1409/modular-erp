@@ -11,7 +11,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Testcontainers.PostgreSql;
 
 namespace Erp.IntegrationTests;
 
@@ -20,14 +19,7 @@ public sealed class UserAdministrationPostgresTests
     [Fact]
     public async Task UsersHaveAtomicTenantScopedAccessAndProtectedAccountLifecycle()
     {
-        PostgreSqlContainer postgres;
-        try
-        {
-            postgres = new PostgreSqlBuilder("postgres:18-alpine").WithDatabase("user_admin_tests")
-                .WithUsername("erp").WithPassword("integration_only_password").Build();
-            await postgres.StartAsync();
-        }
-        catch (Exception) when (!string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase)) { return; }
+        var postgres = await IntegrationContainers.StartPostgresAsync("user_admin_tests");
         await using (postgres)
         {
             var tenantId = Guid.NewGuid();

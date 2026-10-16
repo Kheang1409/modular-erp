@@ -4,7 +4,6 @@ using Erp.Modules.Purchasing;
 using Erp.Modules.Sales;
 using Erp.SharedKernel;
 using Microsoft.EntityFrameworkCore;
-using Testcontainers.PostgreSql;
 
 namespace Erp.IntegrationTests;
 
@@ -13,20 +12,7 @@ public sealed class ReportingPostgresTests
     [Fact]
     public async Task OperationalAndFinancialReportsReconcileToCompanyScopedTransactions()
     {
-        PostgreSqlContainer postgres;
-        try
-        {
-            postgres = new PostgreSqlBuilder("postgres:18-alpine")
-                .WithDatabase("reporting_tests")
-                .WithUsername("erp")
-                .WithPassword("integration_only_password")
-                .Build();
-            await postgres.StartAsync();
-        }
-        catch (Exception) when (!string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
+        var postgres = await IntegrationContainers.StartPostgresAsync("reporting_tests");
 
         await using (postgres)
         {

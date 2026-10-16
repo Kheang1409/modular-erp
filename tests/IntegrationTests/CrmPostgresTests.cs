@@ -2,7 +2,6 @@ using Erp.Abstractions.Context;
 using Erp.Modules.Crm;
 using Erp.SharedKernel;
 using Microsoft.EntityFrameworkCore;
-using Testcontainers.PostgreSql;
 
 namespace Erp.IntegrationTests;
 
@@ -11,9 +10,7 @@ public sealed class CrmPostgresTests
     [Fact]
     public async Task LeadsAreCompanyIsolatedAndConcurrencyIsEnforced()
     {
-        PostgreSqlContainer postgres;
-        try { postgres = new PostgreSqlBuilder("postgres:18-alpine").WithDatabase("crm_tests").WithUsername("erp").WithPassword("integration_only_password").Build(); await postgres.StartAsync(); }
-        catch (Exception) when (!string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase)) { return; }
+        var postgres = await IntegrationContainers.StartPostgresAsync("crm_tests");
         await using (postgres)
         {
             var tenant = Guid.NewGuid(); var companyA = Guid.NewGuid(); var companyB = Guid.NewGuid();

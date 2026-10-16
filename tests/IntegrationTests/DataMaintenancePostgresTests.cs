@@ -10,7 +10,6 @@ using Erp.SharedKernel;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
-using Testcontainers.PostgreSql;
 
 namespace Erp.IntegrationTests;
 
@@ -19,9 +18,7 @@ public sealed class DataMaintenancePostgresTests
     [Fact]
     public async Task CleanupRequiresUnchangedConfirmedScopeAndPreservesBusinessRecoveryAndDuplicatePreventionHistory()
     {
-        await using var postgres = new PostgreSqlBuilder("postgres:18-alpine")
-            .WithDatabase("erp_maintenance_tests").WithUsername("erp").WithPassword("integration_only_password").Build();
-        await postgres.StartAsync(CancellationToken.None);
+        await using var postgres = await IntegrationContainers.StartPostgresAsync("erp_maintenance_tests");
         var options = new DbContextOptionsBuilder<PlatformDbContext>().UseNpgsql(postgres.GetConnectionString()).Options;
         var tenantId = Guid.NewGuid();
         var otherTenantId = Guid.NewGuid();

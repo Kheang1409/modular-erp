@@ -10,7 +10,8 @@ permissions:
 
 jobs:
   build-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-dotnet@v5
@@ -28,7 +29,28 @@ jobs:
           dotnet run --project src/Tools/Erp.Cli --configuration Release --no-build -- module disable community.hello --root artifacts/community-install
           dotnet run --project src/Tools/Erp.Cli --configuration Release --no-build -- module enable community.hello --root artifacts/community-install
       - run: dotnet list Erp.slnx package --vulnerable --include-transitive
-      - run: dotnet test Erp.slnx --configuration Release --no-build --logger trx
+      - name: Unit tests
+        run: dotnet test tests/UnitTests/Erp.UnitTests.csproj --configuration Release --no-build --no-restore --logger trx --results-directory artifacts/test-results/unit
+      - name: Architecture tests
+        run: dotnet test tests/ArchitectureTests/Erp.ArchitectureTests.csproj --configuration Release --no-build --no-restore --logger trx --results-directory artifacts/test-results/architecture
+      - name: Check Docker integration test prerequisite
+        run: docker info --format '{{.ServerVersion}}'
+      - name: PostgreSQL and storage integration tests
+        env:
+          CI: 'true'
+        run: dotnet test tests/IntegrationTests/Erp.IntegrationTests.csproj --configuration Release --no-build --no-restore --logger trx --results-directory artifacts/test-results/integration
+      - name: Preserve test diagnostics
+        if: always()
+        shell: pwsh
+        run: ./.github/scripts/write-test-summary.ps1 -ResultsRoot artifacts/test-results
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-test-results
+          path: artifacts/test-results/**/*.trx
+          retention-days: 14
+          if-no-files-found: warn
       - if: github.ref == 'refs/heads/main'
         run: docker build -t open-erp:${{ github.sha }} .
       - if: github.ref == 'refs/heads/main'
@@ -36,7 +58,8 @@ jobs:
       - run: docker run --rm -v "${{ github.workspace }}:/workspace" aquasec/trivy:0.74.0 config --exit-code 1 --severity HIGH,CRITICAL /workspace
 
   browser:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     needs: build-test
     env:
       ERP_ADMIN_EMAIL: e2e@example.test
@@ -53,7 +76,22 @@ jobs:
       - run: docker compose up -d --build --wait
       - run: dotnet build tests/EndToEndTests/Erp.EndToEndTests.csproj --no-restore
       - run: pwsh tests/EndToEndTests/bin/Debug/net10.0/playwright.ps1 install --with-deps chromium
-      - run: dotnet test tests/EndToEndTests/Erp.EndToEndTests.csproj --no-build --no-restore
+      - name: Browser workflows and responsive accessibility checks
+        run: dotnet test tests/EndToEndTests/Erp.EndToEndTests.csproj --no-build --no-restore --logger trx --results-directory artifacts/test-results/browser
+      - name: Preserve browser test diagnostics
+        if: always()
+        shell: pwsh
+        run: ./.github/scripts/write-test-summary.ps1 -ResultsRoot artifacts/test-results/browser
+      - name: Upload browser test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-test-results
+          path: |
+            artifacts/test-results/browser/**/*.trx
+            tests/EndToEndTests/bin/Debug/net10.0/reports-dashboard-*.png
+          retention-days: 14
+          if-no-files-found: warn
       - name: Rehearse PostgreSQL backup and isolated restore
         run: docker compose exec -T postgres pg_dump --username=erp --dbname=erp --format=custom --file=/tmp/erp-ci.dump
       - run: docker compose exec -T postgres createdb --username=erp erp_restore

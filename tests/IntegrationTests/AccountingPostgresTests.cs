@@ -7,7 +7,6 @@ using Erp.Modules.Purchasing.Contracts;
 using Erp.Modules.Sales.Contracts;
 using Erp.SharedKernel;
 using Microsoft.EntityFrameworkCore;
-using Testcontainers.PostgreSql;
 using System.Diagnostics;
 
 namespace Erp.IntegrationTests;
@@ -17,28 +16,10 @@ public sealed class AccountingPostgresTests
     [Fact]
     public async Task PostingReceivablesPayablesPaymentsAndReversalsPreserveLedgerInvariants()
     {
-        PostgreSqlContainer? postgres = null;
-        var connectionString = Environment.GetEnvironmentVariable("ERP_TEST_POSTGRES_CONNECTION");
-        try
+        var postgres = await IntegrationContainers.StartPostgresAsync("accounting_workflow_tests");
+        await using (postgres)
         {
-            if (string.IsNullOrWhiteSpace(connectionString))
-            {
-                postgres = new PostgreSqlBuilder("postgres:18-alpine")
-                    .WithDatabase("accounting_workflow_tests")
-                    .WithUsername("erp")
-                    .WithPassword("integration_only_password")
-                    .Build();
-                await postgres.StartAsync();
-                connectionString = postgres.GetConnectionString();
-            }
-        }
-        catch (Exception) when (!string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        try
-        {
+            var connectionString = postgres.GetConnectionString();
             var tenantId = Guid.NewGuid();
             var companyId = Guid.NewGuid();
             var journalId = Guid.NewGuid();
@@ -141,29 +122,12 @@ public sealed class AccountingPostgresTests
             Assert.Contains(outbox.Events, item => item is PaymentPostedEvent);
             Assert.Contains(outbox.Events, item => item is PaymentReversedEvent);
         }
-        finally
-        {
-            if (postgres is not null) await postgres.DisposeAsync();
-        }
     }
 
     [Fact]
     public async Task ConfigurationIsCompanyIsolatedConcurrentAndPeriodAware()
     {
-        PostgreSqlContainer postgres;
-        try
-        {
-            postgres = new PostgreSqlBuilder("postgres:18-alpine")
-                .WithDatabase("accounting_tests")
-                .WithUsername("erp")
-                .WithPassword("integration_only_password")
-                .Build();
-            await postgres.StartAsync();
-        }
-        catch (Exception) when (!string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
+        var postgres = await IntegrationContainers.StartPostgresAsync("accounting_tests");
 
         await using (postgres)
         {

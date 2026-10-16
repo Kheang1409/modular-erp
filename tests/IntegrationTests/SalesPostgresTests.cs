@@ -2,7 +2,6 @@ using Erp.Abstractions.Context;
 using Erp.Modules.Sales;
 using Erp.SharedKernel;
 using Microsoft.EntityFrameworkCore;
-using Testcontainers.PostgreSql;
 
 namespace Erp.IntegrationTests;
 
@@ -11,8 +10,7 @@ public sealed class SalesPostgresTests
     [Fact]
     public async Task QuotationsAndLinesAreCompanyIsolatedAndConcurrent()
     {
-        PostgreSqlContainer postgres; try { postgres = new PostgreSqlBuilder("postgres:18-alpine").WithDatabase("sales_tests").WithUsername("erp").WithPassword("integration_only_password").Build(); await postgres.StartAsync(); }
-        catch (Exception) when (!string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase)) { return; }
+        var postgres = await IntegrationContainers.StartPostgresAsync("sales_tests");
         await using (postgres)
         {
             var tenant = Guid.NewGuid(); var companyA = Guid.NewGuid(); var companyB = Guid.NewGuid(); var quoteId = Guid.NewGuid(); var orderId = Guid.NewGuid(); var options = new DbContextOptionsBuilder<SalesDbContext>().UseNpgsql(postgres.GetConnectionString()).Options;

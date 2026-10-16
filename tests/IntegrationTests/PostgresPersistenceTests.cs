@@ -24,7 +24,6 @@ using Erp.SharedKernel;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
-using Testcontainers.PostgreSql;
 using Microsoft.Extensions.Options;
 using System.Text;
 using Microsoft.Extensions.DependencyInjection;
@@ -37,21 +36,7 @@ public sealed class PostgresPersistenceTests
     [Fact]
     public async Task PlatformModelCreatesAndRoundTripsTenantInPostgres()
     {
-        PostgreSqlContainer postgres;
-        try
-        {
-            postgres = new PostgreSqlBuilder("postgres:18-alpine")
-                .WithDatabase("erp_tests")
-                .WithUsername("erp")
-                .WithPassword("integration_only_password")
-                .Build();
-            await postgres.StartAsync(CancellationToken.None);
-        }
-        catch (Exception exception) when (!string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase))
-        {
-            _ = exception;
-            return;
-        }
+        var postgres = await IntegrationContainers.StartPostgresAsync("erp_tests");
 
         await using (postgres)
         {

@@ -5,7 +5,6 @@ using Erp.Modules.Products;
 using Erp.SharedKernel;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
-using Testcontainers.PostgreSql;
 
 namespace Erp.IntegrationTests;
 
@@ -14,17 +13,7 @@ public sealed class ProductsPostgresTests
     [Fact]
     public async Task ProductWorkflowEnforcesIsolationUniquenessConcurrencyAndAudit()
     {
-        PostgreSqlContainer postgres;
-        try
-        {
-            postgres = new PostgreSqlBuilder("postgres:18-alpine").WithDatabase("products_tests")
-                .WithUsername("erp").WithPassword("integration_only_password").Build();
-            await postgres.StartAsync(CancellationToken.None);
-        }
-        catch (Exception) when (!string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
+        var postgres = await IntegrationContainers.StartPostgresAsync("products_tests");
 
         await using (postgres)
         {
