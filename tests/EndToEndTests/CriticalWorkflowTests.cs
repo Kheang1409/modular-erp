@@ -62,6 +62,7 @@ public sealed class CriticalWorkflowTests(ITestOutputHelper output)
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Browser workflow product", Level = 1 })).ToBeVisibleAsync();
         var productAccessibility = await page.RunAxe();
         Assert.Empty(productAccessibility.Violations ?? []);
+        await VerifyProductEditingAsync(page);
 
         await page.GotoAsync(new Uri(new Uri(baseUrl), "/products").ToString());
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Products and services", Level = 1 })).ToBeVisibleAsync();
@@ -156,5 +157,33 @@ public sealed class CriticalWorkflowTests(ITestOutputHelper output)
         await page.GotoAsync(new Uri(new Uri(baseUrl), "/organization").ToString());
         await Assertions.Expect(page.Locator(".shell")).ToHaveAttributeAsync("data-interactive", "true");
         await page.ScreenshotAsync(new() { Path = Path.Combine(AppContext.BaseDirectory, "company-administration-desktop.png") });
+    }
+
+    private static async Task VerifyProductEditingAsync(IPage page)
+    {
+        await page.GetByRole(AriaRole.Link, new() { Name = "Edit product", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.Locator(".shell")).ToHaveAttributeAsync("data-interactive", "true");
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Edit product", Level = 1, Exact = true })).ToBeVisibleAsync();
+        var name = page.Locator("label").Filter(new() { HasText = "Name" }).Locator("input");
+        await Assertions.Expect(name).ToHaveValueAsync("Browser workflow product");
+        Assert.Equal(0, await page.Locator(".error-panel, main [role='alert']").CountAsync());
+        Assert.Empty((await page.RunAxe()).Violations ?? []);
+
+        // The normalized value appears only after the server has saved and rebound the form.
+        await name.FillAsync(" Browser workflow product updated ");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Save product", Exact = true }).ClickAsync();
+        await Assertions.Expect(name).ToHaveValueAsync("Browser workflow product updated");
+        await page.GetByRole(AriaRole.Link, new() { Name = "View product", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Browser workflow product updated", Level = 1, Exact = true })).ToBeVisibleAsync();
+
+        foreach (var action in new[] { (Button: "Archive", Status: "Archived"), (Button: "Reactivate", Status: "Active") })
+        {
+            await page.GetByRole(AriaRole.Link, new() { Name = "Edit product", Exact = true }).ClickAsync();
+            await Assertions.Expect(page.Locator(".shell")).ToHaveAttributeAsync("data-interactive", "true");
+            await page.GetByRole(AriaRole.Button, new() { Name = action.Button, Exact = true }).ClickAsync();
+            await page.WaitForURLAsync("**/products/*/details");
+            await Assertions.Expect(page.Locator(".heading-badges .status-badge").Filter(new() { HasText = action.Status })).ToHaveTextAsync(action.Status);
+            Assert.Equal(0, await page.Locator(".error-panel, main [role='alert']").CountAsync());
+        }
     }
 }
