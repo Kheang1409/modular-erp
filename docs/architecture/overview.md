@@ -36,11 +36,12 @@ and `IBusinessTransactionCoordinator`; a module implements `ITransactionParticip
 using its own DbContext. Modules never access platform entities or another
 module's schema to participate.
 
-Contacts and Products have adopted this boundary. Their create, update, archive,
-and reactivate operations share one physical connection and transaction with
-platform audit and any staged outbox messages. The coordinator flushes pending
-platform changes before committing. Ordinary CSV imports preserve independent
-transactions per valid row.
+Contacts, Products, and CRM have adopted this boundary. Their mutations share
+one physical connection and transaction with platform audit and any staged
+outbox messages. CRM also covers stages, assignments, activity completion/reopening,
+and lead conversion with both audit entries. The coordinator flushes pending
+platform changes before committing. Ordinary Contacts and Products CSV imports
+preserve independent transactions per valid row.
 Other writable modules retain their existing boundaries until explicitly migrated;
 this is not a system-wide atomicity claim.
 

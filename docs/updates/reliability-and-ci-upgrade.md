@@ -20,7 +20,7 @@ context alongside the platform audit and outbox context. Module ownership remain
 explicit: modules communicate through public contracts and do not reach into one
 another's entities or private schemas.
 
-## Contacts first, then Products
+## Contacts, Products, and now CRM
 
 Creating, editing, archiving, or reactivating a contact now commits its business
 changes and audit trail together. If the operation fails before commit, both are
@@ -44,6 +44,22 @@ controlled rendered-form regression guarding against overlapping calls.
 
 These are the first migration slices, not a claim that every business module has
 already adopted the new boundary.
+
+CRM is the next adoption. Its lead and opportunity workflows, pipeline-stage
+configuration, assignments, and activity creation/completion/reopening now commit
+with their platform audit records. Lead conversion is especially important: the
+source-lead update, new opportunity, and both audit entries belong to one
+transaction, even though the workflow flushes audit records twice.
+
+Failures after either conversion flush roll back the complete operation. Return
+data is resolved before commit as well, so a late stage-lookup failure cannot
+leave a committed assignment behind. The upgrade keeps existing permissions and
+business-state rules and requires no schema migration or new CRM event types.
+
+Real directory tests also exposed an assignment-query issue: company-user lookup
+filtered a projected record that PostgreSQL's EF provider could not translate.
+Filtering and ordering now happen before the final record projection, retaining
+the same tenant/company membership checks while making assignment usable.
 
 ## Verification should be real, not a passing no-op
 
@@ -104,6 +120,11 @@ The browser workflow also caught mobile overflow in the company directory. Its
 screen-reader-only action heading was positioned outside the table's scroll
 container. The layout fix contains that heading without removing its accessible
 label or hiding the table's horizontal scrolling.
+
+The browser checks also follow the drawer's current Open/Close navigation labels
+and cover visible keyboard-focus wrapping, scrim/Escape closure, and focus
+restoration. Navigation waits for each new interactive circuit before the next
+click: rendered server HTML alone does not prove an interactive page is ready.
 
 ## What remains before a production release
 
