@@ -112,7 +112,7 @@ Run the complete browser suite only against a disposable test environment: `Crit
 
 ## Current milestone and next steps
 
-This is a pre-release community preview, not a production-readiness guarantee. Contacts create, update, archive, and reactivate operations now enlist their business changes and platform audit records in one PostgreSQL transaction. Each valid CSV row still commits independently. See the [transaction boundary](docs/architecture/overview.md#business-transaction-boundary) and the [upgrade article](docs/updates/reliability-and-ci-upgrade.md).
+This is a pre-release community preview, not a production-readiness guarantee. Contacts and Products create, update, archive, and reactivate operations now enlist their business changes and platform audit records in one PostgreSQL transaction. Each valid CSV row still commits independently during ordinary imports. See the [transaction boundary](docs/architecture/overview.md#business-transaction-boundary) and the [upgrade article](docs/updates/reliability-and-ci-upgrade.md).
 
 Next release gates are migrating the remaining writable modules to the shared transaction boundary, completing realistic-volume performance and security checks, proving production-like restore and module-upgrade recovery, obtaining a green complete CI run, and publishing reviewed release notes and a version tag. Advanced inventory costing, lots/serials, and additional ERP modules remain separate future extensions.
 

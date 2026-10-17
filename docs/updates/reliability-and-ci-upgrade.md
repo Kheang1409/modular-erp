@@ -20,7 +20,7 @@ context alongside the platform audit and outbox context. Module ownership remain
 explicit: modules communicate through public contracts and do not reach into one
 another's entities or private schemas.
 
-## Contacts is the first adoption
+## Contacts first, then Products
 
 Creating, editing, archiving, or reactivating a contact now commits its business
 changes and audit trail together. If the operation fails before commit, both are
@@ -32,7 +32,17 @@ own transaction, and invalid rows do not undo earlier successful rows. Nested
 operations cannot accidentally commit an outer transaction. Cancellation also
 triggers rollback and cleanup of participating change trackers.
 
-This is the first migration slice, not a claim that every business module has
+Products now follows the same boundary for creating, editing, archiving, and
+reactivating catalog items. Product changes and audit records commit together;
+ordinary CSV imports retain independent transactions per successful row.
+Explicit outer transactions can also compose Products and Contacts operations.
+This does not introduce new Product integration event types or change the schema.
+
+The shared connection also requires sequential reads. The product edit page now
+waits for its record before loading company currencies and units, with a
+controlled rendered-form regression guarding against overlapping calls.
+
+These are the first migration slices, not a claim that every business module has
 already adopted the new boundary.
 
 ## Verification should be real, not a passing no-op

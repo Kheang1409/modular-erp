@@ -4,6 +4,8 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## 0.1.0 - unreleased
 
+- Extended the shared transaction boundary to Products create/edit/archive/reactivate and their audit records, preserving ordinary CSV partial success and existing conflict/concurrency responses without schema changes.
+- Made product-editor initialization sequential for the shared session and added controlled rendered-form, PostgreSQL failure/retry, and browser product lifecycle regressions.
 - Added a shared PostgreSQL transaction coordinator and atomic Contacts business/audit writes, with rollback, nested-scope, cancellation, and retry regressions against real PostgreSQL.
 - Made integration tests fail closed when Docker or container startup is unavailable; removed the external Accounting test-database override and centralized disposable container startup.
 - Separated CI unit, architecture, integration, and browser gates and retained test-result and dashboard screenshot diagnostics on a pinned Ubuntu runner.
