@@ -212,7 +212,10 @@ public static class DatabaseInitializer
         UserCompanyMembership membership,
         CancellationToken cancellationToken)
     {
-        var company = await database.Companies.IgnoreQueryFilters().SingleAsync(
+        // A first-run company is still staged in this transaction, so a database query cannot see it yet.
+        var company = database.Companies.Local.SingleOrDefault(
+            x => x.TenantId == membership.TenantId && x.Id == membership.CompanyId)
+            ?? await database.Companies.IgnoreQueryFilters().SingleAsync(
             x => x.TenantId == membership.TenantId && x.Id == membership.CompanyId, cancellationToken);
         var code = company.BaseCurrencyCode.Trim().ToUpperInvariant();
         company.BaseCurrencyCode = code;

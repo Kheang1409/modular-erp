@@ -71,6 +71,18 @@ without echoing request bodies, credentials, or exception payloads.
 These changes improve failure visibility. They do not turn an unverified hosted
 run into a successful one or hide a failed assertion.
 
+## Fresh installations need their own regression coverage
+
+The readiness gate also exposed a first-run bootstrap bug: startup created a
+company in a transaction, then queried PostgreSQL for that company before it
+had been saved. Base-currency setup now uses the tracked company first, keeping
+the existing transaction and database fallback for established companies.
+
+Disposable PostgreSQL regressions cover fresh initialization, repeat startup
+without duplicate records or overwritten settings, and currency backfill for an
+existing organization. This fix does not change the schema or migrate business
+data.
+
 ## What remains before a production release
 
 The next steps are adopting the transaction boundary in the remaining writable

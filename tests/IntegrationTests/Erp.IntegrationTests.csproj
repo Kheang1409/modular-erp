@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <PackageReference Include="Testcontainers.PostgreSql" Version="4.16.0" />
+    <ProjectReference Include="..\..\src\Platform\Erp.Host\Erp.Host.csproj" />
     <ProjectReference Include="..\..\src\Platform\Erp.Infrastructure\Erp.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Platform\Erp.ModuleSystem\Erp.ModuleSystem.csproj" />
     <ProjectReference Include="..\..\samples\SampleModule\Erp.Modules.Sample.csproj" />
