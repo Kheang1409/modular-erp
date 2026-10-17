@@ -6,8 +6,7 @@
 
 <a class="skip-link" href="#main-content">Skip to main content</a>
 <div class="shell @(_menuOpen ? "menu-open" : null)" data-interactive="@_interactive.ToString().ToLowerInvariant()" @onkeydown="HandleNavigationKey">
-    <aside id="primary-sidebar" aria-label="Application navigation">
-        <button class="sidebar-close" type="button" aria-label="Close navigation" @ref="_closeNavigationButton" @onclick="CloseMenu"><span>Close</span><span aria-hidden="true">&#215;</span></button>
+    <aside id="primary-sidebar" aria-label="Application navigation" tabindex="-1" @ref="_sidebar">
         <a class="brand" href="/">
             <span class="brand-mark" aria-hidden="true">
                 <svg viewBox="0 0 24 24" focusable="false"><path d="M4 19V9.5L12 4l8 5.5V19h-5v-5h-6v5H4Z" /><path d="M8 10h.01M16 10h.01" /></svg>
@@ -42,13 +41,19 @@
             </AuthorizeView>
         </nav>
     </aside>
-    @if (_menuOpen)
-    {
-        <button class="sidebar-scrim" type="button" aria-label="Close navigation" @onclick="CloseMenu"></button>
-    }
+    <button class="sidebar-scrim @(_menuOpen ? "is-visible" : null)" type="button" aria-label="Close navigation" aria-hidden="@(!_menuOpen)" tabindex="-1" @onclick="CloseMenu"></button>
     <div class="content">
         <header class="workspace-header">
-            <button class="menu-toggle" type="button" aria-controls="primary-sidebar" aria-expanded="@_menuOpen.ToString().ToLowerInvariant()" @ref="_menuToggle" @onclick="ToggleMenu"><span aria-hidden="true">&#9776;</span><span>Menu</span></button>
+            <button class="menu-toggle" type="button" aria-label="@(_menuOpen ? "Close navigation" : "Open navigation")" aria-controls="primary-sidebar" aria-expanded="@_menuOpen.ToString().ToLowerInvariant()" @ref="_menuToggle" @onclick="ToggleMenu">
+                @if (_menuOpen)
+                {
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 6 12 12M18 6 6 18" /></svg>
+                }
+                else
+                {
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
+                }
+            </button>
             <div class="workspace-context"><span>Workspace <span class="context-divider" aria-hidden="true">/</span> @CurrentSection</span><strong>@CurrentPage</strong></div>
             <div class="header-spacer"></div>
             <AuthorizeView>
@@ -100,8 +105,8 @@
     private ErrorBoundary? _errorBoundary;
     private bool _menuOpen;
     private bool _interactive;
-    private bool _focusCloseControl;
-    private ElementReference _menuToggle, _closeNavigationButton;
+    private bool _focusSidebar;
+    private ElementReference _menuToggle, _sidebar;
     private IReadOnlyList<CompanySummary> _companies = [];
     private IReadOnlyList<CompanySummary> AvailableCompanies => _companies.Where(company => company.IsMember && company.IsActive).ToArray();
     private string RelativeUrl => "/" + NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
@@ -139,11 +144,11 @@
     }
     private bool IsGroupActive(IGrouping<string, NavigationItem> group) =>
         group.Any(item => NavigationManager.Uri.Contains(item.Href, StringComparison.OrdinalIgnoreCase));
-    private void ToggleMenu() { _menuOpen = !_menuOpen; _focusCloseControl = _menuOpen; }
+    private void ToggleMenu() { _menuOpen = !_menuOpen; _focusSidebar = _menuOpen; }
     private async Task CloseMenu()
     {
         if (!_menuOpen) return;
-        _menuOpen = false; _focusCloseControl = false;
+        _menuOpen = false; _focusSidebar = false;
         await _menuToggle.FocusAsync(preventScroll: true);
     }
     private Task HandleNavigationKey(KeyboardEventArgs args) => args.Key == "Escape" ? CloseMenu() : Task.CompletedTask;
@@ -165,10 +170,10 @@
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender) { _interactive = true; StateHasChanged(); }
-        if (_menuOpen && _focusCloseControl)
+        if (_menuOpen && _focusSidebar)
         {
-            _focusCloseControl = false;
-            await _closeNavigationButton.FocusAsync();
+            _focusSidebar = false;
+            await _sidebar.FocusAsync(preventScroll: true);
         }
     }
 }

@@ -20,7 +20,7 @@
         const first = controls[0];
         const last = controls[controls.length - 1];
         const active = document.activeElement;
-        if (!drawer.contains(active) || (!event.shiftKey && active === last)) {
+        if ((active === drawer && event.shiftKey) || !drawer.contains(active) || (!event.shiftKey && active === last)) {
             event.preventDefault();
             first.focus();
         } else if (event.shiftKey && active === first) {
