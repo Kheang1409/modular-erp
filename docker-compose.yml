@@ -20,6 +20,7 @@ services:
       dockerfile: Dockerfile
     environment:
       ASPNETCORE_ENVIRONMENT: Development
+      Web__ApiBaseAddress: http://127.0.0.1:8080/
       ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=${POSTGRES_DB:-erp};Username=${POSTGRES_USER:-erp};Password=${POSTGRES_PASSWORD:-erp_local_only}
       Database__MigrateOnStartup: "true"
       BootstrapAdmin__Email: ${ERP_ADMIN_EMAIL:-}

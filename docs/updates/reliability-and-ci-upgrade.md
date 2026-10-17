@@ -83,6 +83,13 @@ without duplicate records or overwritten settings, and currency backfill for an
 existing organization. This fix does not change the schema or migrate business
 data.
 
+Browser verification on a nondefault Docker port uncovered another deployment
+issue: server-rendered pages were calling the browser's published address from
+inside the container. Compose now supplies an internal loopback API address, so
+Inventory and Reporting do not depend on the external port. Explicit addresses
+are restricted to HTTP(S) loopback URLs without credentials, query strings, or
+fragments; authentication forwarding and API authorization remain unchanged.
+
 ## What remains before a production release
 
 The next steps are adopting the transaction boundary in the remaining writable

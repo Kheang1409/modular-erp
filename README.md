@@ -18,6 +18,8 @@ If `.env` already exists, keep it rather than copying over it. Never commit cred
 
 Open [http://localhost:8080](http://localhost:8080) and sign in with the administrator email and password configured in `.env`. The port can be changed with `ERP_PORT`.
 
+Compose sets `Web__ApiBaseAddress=http://127.0.0.1:8080/` so server-rendered pages can call their own API even when the published port changes. Outside Compose, this optional setting must be an absolute HTTP(S) loopback URL without credentials, a query, or a fragment; if omitted, pages use the browser's base address. For a reverse proxy, configure the host's own listening address and preserve any application base path.
+
 The supplied Compose setup is for **local development**, not production. It starts PostgreSQL 18, applies platform and module migrations, and bootstraps the administrator once. While bootstrap credentials remain configured, subsequent startup synchronizes the system Administrator role with registered permissions without resetting the user's password. Remove `ERP_ADMIN_EMAIL` and `ERP_ADMIN_PASSWORD` after initial setup. Named volumes retain the database, files, authentication keys, and external modules; `docker compose down -v` deletes those volumes and must not be used on data you need to keep.
 
 Useful local endpoints:

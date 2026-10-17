@@ -10,6 +10,7 @@ All notable changes are documented here. The project follows semantic versioning
 - Replaced the unavailable MinIO test-image reference with a disposable source-pinned BuildKit build using digest-pinned official Docker CLI, Go, and Alpine images, without weakening the S3 storage contract test; updated test-only Testcontainers to 4.16.
 - Added a bounded HTTP-readiness gate and allowlisted browser setup-phase/login-status diagnostics, without changing authentication or workflow assertions or echoing raw test payloads in public annotations.
 - Fixed first-run organization bootstrap to use the newly tracked company when seeding its base currency, with PostgreSQL regressions for fresh startup, restart idempotence, and existing-company currency backfill.
+- Added a validated loopback API address for server-rendered pages and configured Docker Compose to use the internal port, fixing Inventory and Reporting when the browser uses a different published port.
 - Documented the first transaction-adoption milestone, remaining release gates, and a community upgrade article without claiming production readiness.
 
 - Added tenant/company security, roles, auditing, attachments, background jobs, and transactional outbox foundations.

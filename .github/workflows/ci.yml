@@ -67,7 +67,9 @@ jobs:
     env:
       ERP_ADMIN_EMAIL: e2e@example.test
       ERP_ADMIN_PASSWORD: E2e-Only-Password-14092020!
-      ERP_E2E_BASE_URL: http://localhost:8080
+      # Deliberately differ from the container port to exercise server-side API routing.
+      ERP_PORT: '18080'
+      ERP_E2E_BASE_URL: http://localhost:18080
       ERP_E2E_EMAIL: e2e@example.test
       ERP_E2E_PASSWORD: E2e-Only-Password-14092020!
     steps:
