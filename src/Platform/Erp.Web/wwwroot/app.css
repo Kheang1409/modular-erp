@@ -183,7 +183,7 @@ legend { float: none; width: auto; margin-bottom: .5rem; padding-inline: .25rem;
 .danger-zone { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: 1.5rem; padding: 1rem; border: 1px solid #edc4c9; border-radius: .65rem; background: #fffafb; }
 .danger-zone p { margin: .2rem 0 0; color: var(--muted); }
 
-.table-scroll { max-width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: .6rem; background: white; }
+.table-scroll { position: relative; max-width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: .6rem; background: white; }
 .table-scroll:focus-visible { outline: 3px solid #8097ed; outline-offset: 3px; }
 table { width: 100%; margin: .5rem 0; border-collapse: collapse; font-size: .85rem; }
 .table-scroll table { margin: 0; }

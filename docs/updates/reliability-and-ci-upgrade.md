@@ -90,6 +90,11 @@ Inventory and Reporting do not depend on the external port. Explicit addresses
 are restricted to HTTP(S) loopback URLs without credentials, query strings, or
 fragments; authentication forwarding and API authorization remain unchanged.
 
+The browser workflow also caught mobile overflow in the company directory. Its
+screen-reader-only action heading was positioned outside the table's scroll
+container. The layout fix contains that heading without removing its accessible
+label or hiding the table's horizontal scrolling.
+
 ## What remains before a production release
 
 The next steps are adopting the transaction boundary in the remaining writable
