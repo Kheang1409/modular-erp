@@ -1,11 +1,14 @@
 using Erp.Abstractions.Context;
+using Erp.Abstractions.Persistence;
+using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Erp.Modules.Crm;
 
 public sealed class CrmDbContext(DbContextOptions<CrmDbContext> options, ITenantContext? tenant = null,
-    ICompanyContext? company = null) : DbContext(options)
+    ICompanyContext? company = null) : DbContext(options), ITransactionParticipant
 {
     private Guid TenantId => tenant?.TenantId?.Value ?? Guid.Empty;
     private Guid CompanyId => company?.CompanyId?.Value ?? Guid.Empty;
@@ -13,6 +16,19 @@ public sealed class CrmDbContext(DbContextOptions<CrmDbContext> options, ITenant
     public DbSet<PipelineStage> PipelineStages => Set<PipelineStage>();
     public DbSet<Opportunity> Opportunities => Set<Opportunity>();
     public DbSet<CrmActivity> Activities => Set<CrmActivity>();
+
+    DbConnection ITransactionParticipant.Connection => Database.GetDbConnection();
+    bool ITransactionParticipant.HasPendingChanges => ChangeTracker.HasChanges();
+
+    async Task ITransactionParticipant.EnlistAsync(DbTransaction? transaction, CancellationToken cancellationToken)
+    {
+        if (transaction is not null && Database.CurrentTransaction is { } current &&
+            !ReferenceEquals(current.GetDbTransaction(), transaction))
+            throw new InvalidOperationException("An unrelated CRM transaction is already active.");
+        _ = await Database.UseTransactionAsync(transaction, cancellationToken);
+    }
+
+    void ITransactionParticipant.DiscardChanges() => ChangeTracker.Clear();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

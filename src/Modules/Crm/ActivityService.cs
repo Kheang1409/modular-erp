@@ -3,6 +3,7 @@ using System.Text.Json;
 using Erp.Abstractions.Auditing;
 using Erp.Abstractions.Context;
 using Erp.Abstractions.Organization;
+using Erp.Abstractions.Persistence;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 
@@ -16,7 +17,8 @@ public interface IActivityService
 }
 
 public sealed class ActivityService(CrmDbContext database, ITenantContext tenant, ICompanyContext company,
-    ICompanyUserDirectory users, IClock clock, IAuditLogWriter audit, IHttpContextAccessor http) : IActivityService
+    ICompanyUserDirectory users, IClock clock, IAuditLogWriter audit, IHttpContextAccessor http,
+    IBusinessTransactionCoordinator transactions) : IActivityService
 {
     public async Task<IReadOnlyList<ActivityDto>> ListAsync(Guid? leadId, Guid? opportunityId, CancellationToken token)
     { ValidateParent(leadId, opportunityId); return await database.Activities.AsNoTracking().Where(x => x.LeadId == leadId && x.OpportunityId == opportunityId).OrderByDescending(x => x.CreatedAtUtc).Select(x => Dto(x)).ToListAsync(token); }
@@ -25,6 +27,7 @@ public sealed class ActivityService(CrmDbContext database, ITenantContext tenant
         ValidateParent(request.LeadId, request.OpportunityId); var subject = string.IsNullOrWhiteSpace(request.Subject) ? null : request.Subject.Trim();
         if (subject is null || subject.Length > 200) throw Validation("subject", "Subject is required and cannot exceed 200 characters.");
         if (request.Details?.Length > 4000) throw Validation("details", "Details cannot exceed 4,000 characters.");
+        await using var transaction = await transactions.BeginAsync(database, token);
         if (request.AssignedUserId is not null && await users.FindAsync(request.AssignedUserId.Value, token) is null) throw Validation("assignedUserId", "Assigned user is not a member of the active company.");
         if (request.LeadId is not null && !await database.Leads.AnyAsync(x => x.Id == request.LeadId, token)) throw Validation("leadId", "Lead was not found.");
         if (request.OpportunityId is not null && !await database.Opportunities.AnyAsync(x => x.Id == request.OpportunityId, token)) throw Validation("opportunityId", "Opportunity was not found.");
@@ -44,15 +47,22 @@ public sealed class ActivityService(CrmDbContext database, ITenantContext tenant
             CreatedBy = User(),
             ConcurrencyStamp = Stamp()
         };
-        database.Activities.Add(activity); await database.SaveChangesAsync(token); await WriteAudit("crm.activity.created", activity, token); return Dto(activity);
+        database.Activities.Add(activity); await database.SaveChangesAsync(token); await WriteAudit("crm.activity.created", activity, token);
+        var result = Dto(activity);
+        await transaction.CommitAsync(token);
+        return result;
     }
     public async Task<ActivityDto> SetCompletedAsync(Guid id, string concurrencyStamp, bool completed, CancellationToken token)
     {
+        await using var transaction = await transactions.BeginAsync(database, token);
         var activity = await database.Activities.SingleOrDefaultAsync(x => x.Id == id, token) ?? throw new KeyNotFoundException();
         if (!StringComparer.Ordinal.Equals(activity.ConcurrencyStamp, concurrencyStamp)) throw new LeadConcurrencyException();
         activity.CompletedAtUtc = completed ? clock.UtcNow : null; activity.ConcurrencyStamp = Stamp();
         try { await database.SaveChangesAsync(token); } catch (DbUpdateConcurrencyException) { throw new LeadConcurrencyException(); }
-        await WriteAudit(completed ? "crm.activity.completed" : "crm.activity.reopened", activity, token); return Dto(activity);
+        await WriteAudit(completed ? "crm.activity.completed" : "crm.activity.reopened", activity, token);
+        var result = Dto(activity);
+        await transaction.CommitAsync(token);
+        return result;
     }
     private async Task WriteAudit(string action, CrmActivity value, CancellationToken token) { audit.Append(new(action, "CrmActivity", value.Id.ToString(), null, null, JsonSerializer.Serialize(Dto(value)))); await audit.FlushAsync(token); }
     internal static void ValidateParent(Guid? leadId, Guid? opportunityId) { if (leadId.HasValue == opportunityId.HasValue) throw Validation("parent", "Exactly one leadId or opportunityId is required."); }

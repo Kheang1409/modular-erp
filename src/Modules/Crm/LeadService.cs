@@ -3,6 +3,7 @@ using System.Text.Json;
 using Erp.Abstractions.Auditing;
 using Erp.Abstractions.Context;
 using Erp.Abstractions.Organization;
+using Erp.Abstractions.Persistence;
 using Erp.Modules.Contacts.Contracts;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -22,7 +23,8 @@ public interface ILeadService
 }
 
 public sealed class LeadService(CrmDbContext database, ITenantContext tenant, ICompanyContext company,
-    IContactDirectory contacts, ICompanyUserDirectory users, IClock clock, IAuditLogWriter audit, IHttpContextAccessor http) : ILeadService
+    IContactDirectory contacts, ICompanyUserDirectory users, IClock clock, IAuditLogWriter audit, IHttpContextAccessor http,
+    IBusinessTransactionCoordinator transactions) : ILeadService
 {
     public async Task<LeadPage> SearchAsync(LeadQuery query, CancellationToken cancellationToken)
     {
@@ -57,6 +59,7 @@ public sealed class LeadService(CrmDbContext database, ITenantContext tenant, IC
     public async Task<LeadDto> CreateAsync(LeadRequest request, CancellationToken cancellationToken)
     {
         var values = Validate(request, requireStamp: false);
+        await using var transaction = await transactions.BeginAsync(database, cancellationToken);
         var contact = await ValidateContactAsync(values.ContactId, cancellationToken);
         var now = clock.UtcNow;
         var lead = new Lead
@@ -82,12 +85,15 @@ public sealed class LeadService(CrmDbContext database, ITenantContext tenant, IC
             ConcurrencyStamp = NewStamp()
         };
         database.Leads.Add(lead); await SaveAsync(cancellationToken); await AuditAsync("crm.lead.created", lead, null, cancellationToken);
-        return ToDto(lead, contact?.DisplayName);
+        var result = ToDto(lead, contact?.DisplayName);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     public async Task<LeadDto> UpdateAsync(Guid id, LeadRequest request, CancellationToken cancellationToken)
     {
         var values = Validate(request, requireStamp: true);
+        await using var transaction = await transactions.BeginAsync(database, cancellationToken);
         var contact = await ValidateContactAsync(values.ContactId, cancellationToken);
         var lead = await FindAsync(id, cancellationToken); EnsureStamp(lead, values.ConcurrencyStamp!);
         if (lead.State is LeadState.Converted) throw Validation("state", "Converted leads cannot be edited.");
@@ -96,40 +102,53 @@ public sealed class LeadService(CrmDbContext database, ITenantContext tenant, IC
         lead.Source = values.Source; lead.ExpectedRevenue = values.ExpectedRevenue; lead.Probability = values.Probability;
         lead.PlannedCloseDate = values.PlannedCloseDate; lead.Notes = values.Notes;
         Touch(lead); await SaveAsync(cancellationToken); await AuditAsync("crm.lead.updated", lead, before, cancellationToken);
-        return ToDto(lead, contact?.DisplayName);
+        var result = ToDto(lead, contact?.DisplayName);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     public async Task<LeadDto> TransitionAsync(Guid id, LeadState state, LeadTransitionRequest request, CancellationToken cancellationToken)
     {
         if (state is not (LeadState.Qualified or LeadState.Lost or LeadState.New)) throw Validation("state", "Unsupported lead transition.");
+        await using var transaction = await transactions.BeginAsync(database, cancellationToken);
         var lead = await FindAsync(id, cancellationToken); EnsureStamp(lead, request.ConcurrencyStamp);
         if (lead.State == LeadState.Converted) throw Validation("state", "Converted leads cannot transition.");
         if (state == LeadState.Lost && string.IsNullOrWhiteSpace(request.Reason)) throw Validation("reason", "A lost reason is required.");
         var before = JsonSerializer.Serialize(ToDto(lead, null)); lead.State = state;
         lead.LostReason = state == LeadState.Lost ? request.Reason!.Trim() : null; Touch(lead);
         await SaveAsync(cancellationToken); await AuditAsync($"crm.lead.{state.ToString().ToLowerInvariant()}", lead, before, cancellationToken);
-        return ToDto(lead, null);
+        var result = ToDto(lead, null);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     public async Task<LeadDto> SetArchivedAsync(Guid id, string concurrencyStamp, bool archived, CancellationToken cancellationToken)
     {
+        await using var transaction = await transactions.BeginAsync(database, cancellationToken);
         var lead = await FindAsync(id, cancellationToken); EnsureStamp(lead, concurrencyStamp); var before = JsonSerializer.Serialize(ToDto(lead, null));
         lead.IsArchived = archived; Touch(lead); await SaveAsync(cancellationToken);
         await AuditAsync(archived ? "crm.lead.archived" : "crm.lead.reactivated", lead, before, cancellationToken);
-        return ToDto(lead, null);
+        var result = ToDto(lead, null);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     public async Task<LeadDto> AssignAsync(Guid id, LeadAssignmentRequest request, CancellationToken cancellationToken)
     {
+        await using var transaction = await transactions.BeginAsync(database, cancellationToken);
         await ValidateAssigneeAsync(request.AssignedUserId, cancellationToken);
         var lead = await FindAsync(id, cancellationToken); EnsureStamp(lead, request.ConcurrencyStamp);
         if (lead.State == LeadState.Converted) throw Validation("state", "Converted leads cannot be reassigned.");
         var before = JsonSerializer.Serialize(ToDto(lead, null)); lead.AssignedUserId = request.AssignedUserId; Touch(lead);
-        await SaveAsync(cancellationToken); await AuditAsync("crm.lead.assigned", lead, before, cancellationToken); return ToDto(lead, null);
+        await SaveAsync(cancellationToken); await AuditAsync("crm.lead.assigned", lead, before, cancellationToken);
+        var result = ToDto(lead, null);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     public async Task<OpportunityDto> ConvertAsync(Guid id, ConvertLeadRequest request, CancellationToken cancellationToken)
     {
+        await using var transaction = await transactions.BeginAsync(database, cancellationToken);
         var lead = await FindAsync(id, cancellationToken); EnsureStamp(lead, request.ConcurrencyStamp);
         if (lead.State != LeadState.Qualified) throw Validation("state", "Only qualified leads can be converted.");
         var stage = await database.PipelineStages.SingleOrDefaultAsync(x => x.Id == request.StageId && x.IsActive, cancellationToken)
@@ -161,9 +180,11 @@ public sealed class LeadService(CrmDbContext database, ITenantContext tenant, IC
         await SaveAsync(cancellationToken); await AuditAsync("crm.lead.converted", lead, null, cancellationToken);
         audit.Append(new("crm.opportunity.created", "Opportunity", opportunity.Id.ToString(), null, null, JsonSerializer.Serialize(opportunity)));
         await audit.FlushAsync(cancellationToken);
-        return new(opportunity.Id, opportunity.SourceLeadId, opportunity.ContactId, contact?.DisplayName, stage.Id, stage.Name,
+        var result = new OpportunityDto(opportunity.Id, opportunity.SourceLeadId, opportunity.ContactId, contact?.DisplayName, stage.Id, stage.Name,
             opportunity.Title, opportunity.ExpectedRevenue, opportunity.Probability, opportunity.AssignedUserId,
             opportunity.PlannedCloseDate, opportunity.State, null, opportunity.Notes, false, now, now, opportunity.ConcurrencyStamp);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     internal static LeadRequest Validate(LeadRequest input, bool requireStamp)
@@ -183,7 +204,8 @@ public sealed class LeadService(CrmDbContext database, ITenantContext tenant, IC
     private async Task<ContactReference?> ValidateContactAsync(Guid? id, CancellationToken token)
     { if (id is null) return null; var contact = await contacts.FindAsync(id.Value, token) ?? throw Validation("contactId", "Contact was not found in the active company."); if (contact.IsArchived) throw Validation("contactId", "Archived contacts cannot be assigned to new CRM work."); return contact; }
     private async Task ValidateAssigneeAsync(Guid? id, CancellationToken token) { if (id is not null && await users.FindAsync(id.Value, token) is null) throw Validation("assignedUserId", "Assigned user is not a member of the active company."); }
-    private Task<Lead> FindAsync(Guid id, CancellationToken token) => database.Leads.SingleOrDefaultAsync(x => x.Id == id, token).ContinueWith(x => x.Result ?? throw new KeyNotFoundException("Lead was not found."), token, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+    private async Task<Lead> FindAsync(Guid id, CancellationToken token) =>
+        await database.Leads.SingleOrDefaultAsync(x => x.Id == id, token) ?? throw new KeyNotFoundException("Lead was not found.");
     private void Touch(Lead lead) { lead.UpdatedAtUtc = clock.UtcNow; lead.UpdatedBy = CurrentUser(); lead.ConcurrencyStamp = NewStamp(); }
     private static void EnsureStamp(Lead lead, string stamp) { if (!StringComparer.Ordinal.Equals(lead.ConcurrencyStamp, stamp)) throw new LeadConcurrencyException(); }
     private async Task SaveAsync(CancellationToken token) { try { await database.SaveChangesAsync(token); } catch (DbUpdateConcurrencyException) { throw new LeadConcurrencyException(); } }

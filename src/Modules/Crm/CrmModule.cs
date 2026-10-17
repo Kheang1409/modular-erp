@@ -1,5 +1,6 @@
 using System.Reflection;
 using Erp.Abstractions.Modules;
+using Erp.Abstractions.Persistence;
 using Erp.Modules.Crm.Contracts;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
@@ -16,8 +17,9 @@ public sealed class CrmModule : IErpModule
     public Assembly ComponentAssembly => typeof(CrmModule).Assembly;
     public void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
-        var connection = configuration.GetConnectionString("Postgres") ?? throw new InvalidOperationException("ConnectionStrings:Postgres is required.");
-        services.AddDbContext<CrmDbContext>(options => options.UseNpgsql(connection, postgres => postgres.MigrationsHistoryTable("__EFMigrationsHistory", "crm")));
+        services.AddDbContext<CrmDbContext>((provider, options) => options.UseNpgsql(
+            provider.GetRequiredService<IRelationalDatabaseSession>().Connection,
+            postgres => postgres.MigrationsHistoryTable("__EFMigrationsHistory", "crm")));
         services.AddScoped<ILeadService, LeadService>(); services.AddScoped<IOpportunityService, OpportunityService>(); services.AddScoped<IActivityService, ActivityService>(); services.AddScoped<ICrmLeadDirectory, CrmLeadDirectory>();
         services.AddScoped<IModuleDatabaseInitializer, CrmDatabaseInitializer>();
     }

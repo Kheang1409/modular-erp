@@ -1,11 +1,21 @@
 using Erp.Abstractions.Modules;
 using Erp.ModuleSystem;
 using Erp.Modules.Crm;
+using Microsoft.EntityFrameworkCore;
 
 namespace Erp.UnitTests;
 
 public sealed class CrmModuleTests
 {
+    [Fact]
+    public void CrmModelMatchesMigrationsSnapshot()
+    {
+        using var database = new CrmDbContext(new DbContextOptionsBuilder<CrmDbContext>()
+            .UseNpgsql("Host=localhost;Database=model_only;Username=erp").Options);
+
+        Assert.False(database.Database.HasPendingModelChanges());
+    }
+
     [Fact]
     public void ManifestDeclaresContactsDependencyAndPermissions()
     { var module = new CrmModule(); var registry = new PermissionRegistry(); module.ConfigurePermissions(registry); Assert.Equal("erp.crm", module.Manifest.Id); var dependency = Assert.Single(module.Manifest.Dependencies); Assert.Equal("erp.contacts", dependency.ModuleId); Assert.Equal(">=0.1.0 <1.0.0", dependency.VersionRange); Assert.Equal(5, registry.Permissions.Count); }
