@@ -1,11 +1,21 @@
 using Erp.Abstractions.Modules;
 using Erp.ModuleSystem;
 using Erp.Modules.Products;
+using Microsoft.EntityFrameworkCore;
 
 namespace Erp.UnitTests;
 
 public sealed class ProductsModuleTests
 {
+    [Fact]
+    public void ProductModelMatchesCommittedMigrationsSnapshot()
+    {
+        using var database = new ProductsDbContext(new DbContextOptionsBuilder<ProductsDbContext>()
+            .UseNpgsql("Host=localhost;Database=model_only;Username=erp").Options);
+
+        Assert.False(database.Database.HasPendingModelChanges());
+    }
+
     [Fact]
     public void ManifestAndPermissionsDescribeProductsBoundary()
     {

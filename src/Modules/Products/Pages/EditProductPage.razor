@@ -34,11 +34,9 @@
     protected override async Task OnParametersSetAsync()
     {
         _loading = true;
-        var productTask = Products.GetAsync(Id, CancellationToken.None);
-        var optionsTask = Products.GetOptionsAsync(CancellationToken.None);
-        await Task.WhenAll(productTask, optionsTask);
-        var product = await productTask;
-        _options = await optionsTask;
+        // Product and company-option reads share a scoped database connection.
+        var product = await Products.GetAsync(Id, CancellationToken.None);
+        _options = await Products.GetOptionsAsync(CancellationToken.None);
         if (product is not null) { Form = ProductForm.From(product); _archived = product.IsArchived; }
         _loading = false;
     }

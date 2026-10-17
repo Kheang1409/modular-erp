@@ -5,6 +5,7 @@ using System.Text.Json;
 using Erp.Abstractions.Auditing;
 using Erp.Abstractions.Context;
 using Erp.Abstractions.Currencies;
+using Erp.Abstractions.Persistence;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 
@@ -25,7 +26,7 @@ public interface IProductService
 public sealed class ProductService(
     ProductsDbContext database, ITenantContext tenantContext, ICompanyContext companyContext,
     ICurrencyConfigurationService currencies, IClock clock, IAuditLogWriter audit,
-    IHttpContextAccessor httpContextAccessor) : IProductService
+    IHttpContextAccessor httpContextAccessor, IBusinessTransactionCoordinator transactions) : IProductService
 {
     public async Task<ProductOptions> GetOptionsAsync(CancellationToken cancellationToken)
     {
@@ -85,6 +86,7 @@ public sealed class ProductService(
     public async Task<ProductDto> CreateAsync(ProductRequest request, CancellationToken cancellationToken)
     {
         var values = Validate(request);
+        await using var transaction = await transactions.BeginAsync(database, cancellationToken);
         await ValidateReferencesAsync(values, cancellationToken);
         await EnsureUniqueAsync(values.Sku!, values.Barcode, null, cancellationToken);
         var now = clock.UtcNow;
@@ -113,7 +115,9 @@ public sealed class ProductService(
         database.Products.Add(product);
         await SaveAsync(cancellationToken);
         await AuditAsync("products.created", product, null, cancellationToken);
-        return ToDto(product);
+        var result = ToDto(product);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     public async Task<ProductDto> UpdateAsync(Guid id, ProductRequest request, CancellationToken cancellationToken)
@@ -121,6 +125,7 @@ public sealed class ProductService(
         if (string.IsNullOrWhiteSpace(request.ConcurrencyStamp))
             throw Validation("concurrencyStamp", "Concurrency stamp is required.");
         var values = Validate(request);
+        await using var transaction = await transactions.BeginAsync(database, cancellationToken);
         await ValidateReferencesAsync(values, cancellationToken);
         var product = await database.Products.SingleOrDefaultAsync(x => x.Id == id, cancellationToken)
             ?? throw new KeyNotFoundException("Product was not found.");
@@ -136,11 +141,14 @@ public sealed class ProductService(
         product.UpdatedAtUtc = clock.UtcNow; product.UpdatedBy = CurrentUserId(); product.ConcurrencyStamp = NewStamp();
         await SaveAsync(cancellationToken);
         await AuditAsync("products.updated", product, before, cancellationToken);
-        return ToDto(product);
+        var result = ToDto(product);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     public async Task<ProductDto> SetArchivedAsync(Guid id, string concurrencyStamp, bool archived, CancellationToken cancellationToken)
     {
+        await using var transaction = await transactions.BeginAsync(database, cancellationToken);
         var product = await database.Products.SingleOrDefaultAsync(x => x.Id == id, cancellationToken)
             ?? throw new KeyNotFoundException("Product was not found.");
         if (!StringComparer.Ordinal.Equals(product.ConcurrencyStamp, concurrencyStamp))
@@ -150,7 +158,9 @@ public sealed class ProductService(
         product.UpdatedBy = CurrentUserId(); product.ConcurrencyStamp = NewStamp();
         await SaveAsync(cancellationToken);
         await AuditAsync(archived ? "products.archived" : "products.reactivated", product, before, cancellationToken);
-        return ToDto(product);
+        var result = ToDto(product);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     public async Task<ProductCsvImportResult> ImportCsvAsync(Stream csv, CancellationToken cancellationToken)

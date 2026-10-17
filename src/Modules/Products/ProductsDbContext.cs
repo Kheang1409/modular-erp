@@ -1,12 +1,15 @@
 using Erp.Abstractions.Context;
+using Erp.Abstractions.Persistence;
+using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Erp.Modules.Products;
 
 public sealed class ProductsDbContext(
     DbContextOptions<ProductsDbContext> options,
     ITenantContext? tenantContext = null,
-    ICompanyContext? companyContext = null) : DbContext(options)
+    ICompanyContext? companyContext = null) : DbContext(options), ITransactionParticipant
 {
     private readonly ITenantContext? _tenantContext = tenantContext;
     private readonly ICompanyContext? _companyContext = companyContext;
@@ -15,6 +18,19 @@ public sealed class ProductsDbContext(
 
     public DbSet<Product> Products => Set<Product>();
     public DbSet<UnitOfMeasure> UnitsOfMeasure => Set<UnitOfMeasure>();
+
+    DbConnection ITransactionParticipant.Connection => Database.GetDbConnection();
+    bool ITransactionParticipant.HasPendingChanges => ChangeTracker.HasChanges();
+
+    async Task ITransactionParticipant.EnlistAsync(DbTransaction? transaction, CancellationToken cancellationToken)
+    {
+        if (transaction is not null && Database.CurrentTransaction is { } current &&
+            !ReferenceEquals(current.GetDbTransaction(), transaction))
+            throw new InvalidOperationException("An unrelated Products transaction is already active.");
+        _ = await Database.UseTransactionAsync(transaction, cancellationToken);
+    }
+
+    void ITransactionParticipant.DiscardChanges() => ChangeTracker.Clear();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

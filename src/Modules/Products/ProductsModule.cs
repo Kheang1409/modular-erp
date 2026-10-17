@@ -1,5 +1,6 @@
 using System.Reflection;
 using Erp.Abstractions.Modules;
+using Erp.Abstractions.Persistence;
 using Erp.Modules.Products.Contracts;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
@@ -20,10 +21,9 @@ public sealed class ProductsModule : IErpModule
 
     public void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
-        var connectionString = configuration.GetConnectionString("Postgres")
-            ?? throw new InvalidOperationException("ConnectionStrings:Postgres is required.");
-        services.AddDbContext<ProductsDbContext>(options => options.UseNpgsql(
-            connectionString, postgres => postgres.MigrationsHistoryTable("__EFMigrationsHistory", "products")));
+        services.AddDbContext<ProductsDbContext>((provider, options) => options.UseNpgsql(
+            provider.GetRequiredService<IRelationalDatabaseSession>().Connection,
+            postgres => postgres.MigrationsHistoryTable("__EFMigrationsHistory", "products")));
         services.AddScoped<IProductService, ProductService>();
         services.AddScoped<IProductDirectory, ProductDirectory>();
         services.AddScoped<IPurchasingProductDirectory, PurchasingProductDirectory>();

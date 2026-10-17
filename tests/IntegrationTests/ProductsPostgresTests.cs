@@ -1,6 +1,7 @@
 using Erp.Abstractions.Auditing;
 using Erp.Abstractions.Context;
 using Erp.Abstractions.Currencies;
+using Erp.Infrastructure.Persistence;
 using Erp.Modules.Products;
 using Erp.SharedKernel;
 using Microsoft.AspNetCore.Http;
@@ -25,9 +26,13 @@ public sealed class ProductsPostgresTests
 
             var audit = new RecordingAudit();
             ProductDto created;
-            await using (var context = new ProductsDbContext(options, new TenantContext(tenant), new CompanyContext(companyA)))
+            await using (var session = new RelationalDatabaseSession(postgres.GetConnectionString()))
+            await using (var platform = new PlatformDbContext(new DbContextOptionsBuilder<PlatformDbContext>()
+                .UseNpgsql(session.Connection).Options, new TenantContext(tenant)))
+            await using (var context = new ProductsDbContext(new DbContextOptionsBuilder<ProductsDbContext>()
+                .UseNpgsql(session.Connection).Options, new TenantContext(tenant), new CompanyContext(companyA)))
             {
-                var service = CreateService(context, tenant, companyA, audit);
+                var service = CreateService(context, platform, tenant, companyA, audit);
                 var productOptions = await service.GetOptionsAsync(CancellationToken.None);
                 Assert.Equal("USD", productOptions.BaseCurrencyCode);
                 Assert.Equal("USD", Assert.Single(productOptions.Currencies).Code);
@@ -66,9 +71,9 @@ public sealed class ProductsPostgresTests
         }
     }
 
-    private static ProductService CreateService(ProductsDbContext context, Guid tenant, Guid company, RecordingAudit audit) =>
+    private static ProductService CreateService(ProductsDbContext context, PlatformDbContext platform, Guid tenant, Guid company, RecordingAudit audit) =>
         new(context, new TenantContext(tenant), new CompanyContext(company), new CurrencyService(), new FixedClock(), audit,
-            new HttpContextAccessor());
+            new HttpContextAccessor(), new BusinessTransactionCoordinator(platform));
 
     private sealed class TenantContext(Guid id) : ITenantContext { public TenantId? TenantId { get; } = new(id); }
     private sealed class CompanyContext(Guid id) : ICompanyContext { public CompanyId? CompanyId { get; } = new(id); }
