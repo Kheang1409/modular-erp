@@ -8,6 +8,7 @@ All notable changes are documented here. The project follows semantic versioning
 - Made integration tests fail closed when Docker or container startup is unavailable; removed the external Accounting test-database override and centralized disposable container startup.
 - Separated CI unit, architecture, integration, and browser gates and retained test-result and dashboard screenshot diagnostics on a pinned Ubuntu runner.
 - Replaced the unavailable MinIO test-image reference with a disposable source-pinned BuildKit build using digest-pinned official Docker CLI, Go, and Alpine images, without weakening the S3 storage contract test; updated test-only Testcontainers to 4.16.
+- Added a bounded HTTP-readiness gate and allowlisted browser setup-phase/login-status diagnostics, without changing authentication or workflow assertions or echoing raw test payloads in public annotations.
 - Documented the first transaction-adoption milestone, remaining release gates, and a community upgrade article without claiming production readiness.
 
 - Added tenant/company security, roles, auditing, attachments, background jobs, and transactional outbox foundations.

@@ -1,9 +1,10 @@
 using Deque.AxeCore.Playwright;
 using Microsoft.Playwright;
+using Xunit.Abstractions;
 
 namespace Erp.EndToEndTests;
 
-public sealed class CriticalWorkflowTests
+public sealed class CriticalWorkflowTests(ITestOutputHelper output)
 {
     [Fact]
     public async Task AuthenticatedNavigationAndInventoryWorkAcrossDesktopAndMobile()
@@ -13,7 +14,9 @@ public sealed class CriticalWorkflowTests
         var password = Environment.GetEnvironmentVariable("ERP_E2E_PASSWORD");
         if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password)) return;
 
+        output.WriteLine("ERP_E2E_PHASE=playwright-create");
         using var playwright = await Playwright.CreateAsync();
+        output.WriteLine("ERP_E2E_PHASE=chromium-launch");
         await using var browser = await playwright.Chromium.LaunchAsync(new() { Headless = true });
         var page = await browser.NewPageAsync(new() { ViewportSize = new() { Width = 1440, Height = 1000 } });
         var browserErrors = new List<string>();
@@ -22,18 +25,23 @@ public sealed class CriticalWorkflowTests
         {
             if (message.Type == "error") browserErrors.Add(message.Text);
         };
+        output.WriteLine("ERP_E2E_PHASE=login-navigation");
         await page.GotoAsync(new Uri(new Uri(baseUrl), "/account/login").ToString());
         Assert.Equal(0, await page.Locator("input:not([type='hidden'])").EvaluateAllAsync<int>("elements => elements.filter(element => !element.labels?.length && !element.getAttribute('aria-label') && !element.getAttribute('aria-labelledby')).length"));
+        output.WriteLine("ERP_E2E_PHASE=antiforgery-token");
         var antiforgeryToken = await page.Locator("input[name='__RequestVerificationToken']").InputValueAsync();
         var loginForm = page.Context.APIRequest.CreateFormData();
         loginForm.Set("email", email);
         loginForm.Set("password", password);
         loginForm.Set("__RequestVerificationToken", antiforgeryToken);
+        output.WriteLine("ERP_E2E_PHASE=login-submit");
         var loginResponse = await page.Context.APIRequest.PostAsync(new Uri(new Uri(baseUrl), "/account/login").ToString(), new()
         {
             Form = loginForm
         });
+        output.WriteLine($"ERP_E2E_LOGIN_STATUS={loginResponse.Status}");
         Assert.True(loginResponse.Ok, $"Authentication setup returned HTTP {loginResponse.Status}.");
+        output.WriteLine("ERP_E2E_PHASE=workflow");
         await page.GotoAsync(baseUrl);
         Assert.DoesNotContain("/account/login", page.Url, StringComparison.Ordinal);
         await Assertions.Expect(page.Locator(".shell")).ToHaveAttributeAsync("data-interactive", "true");

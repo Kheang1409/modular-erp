@@ -1,9 +1,10 @@
 using Deque.AxeCore.Playwright;
 using Microsoft.Playwright;
+using Xunit.Abstractions;
 
 namespace Erp.EndToEndTests;
 
-public sealed class DashboardBrowserTests
+public sealed class DashboardBrowserTests(ITestOutputHelper output)
 {
     [Fact]
     public async Task ReportDashboardsAreAccessibleResponsiveAndUseLocalAssets()
@@ -14,7 +15,9 @@ public sealed class DashboardBrowserTests
         if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password)) return;
 
         var applicationUri = new Uri(baseUrl);
+        output.WriteLine("ERP_E2E_PHASE=playwright-create");
         using var playwright = await Playwright.CreateAsync();
+        output.WriteLine("ERP_E2E_PHASE=chromium-launch");
         await using var browser = await playwright.Chromium.LaunchAsync(new() { Headless = true });
         var page = await browser.NewPageAsync(new() { ViewportSize = new() { Width = 1440, Height = 1000 } });
         var browserErrors = new List<string>();
@@ -35,14 +38,19 @@ public sealed class DashboardBrowserTests
             }
         };
 
+        output.WriteLine("ERP_E2E_PHASE=login-navigation");
         await page.GotoAsync(new Uri(applicationUri, "/account/login").ToString());
         var loginForm = page.Context.APIRequest.CreateFormData();
         loginForm.Set("email", email);
         loginForm.Set("password", password);
+        output.WriteLine("ERP_E2E_PHASE=antiforgery-token");
         loginForm.Set("__RequestVerificationToken", await page.Locator("input[name='__RequestVerificationToken']").InputValueAsync());
+        output.WriteLine("ERP_E2E_PHASE=login-submit");
         var login = await page.Context.APIRequest.PostAsync(new Uri(applicationUri, "/account/login").ToString(), new() { Form = loginForm });
+        output.WriteLine($"ERP_E2E_LOGIN_STATUS={login.Status}");
         Assert.True(login.Ok, $"Authentication setup returned HTTP {login.Status}.");
 
+        output.WriteLine("ERP_E2E_PHASE=workflow");
         await VisitAsync(page, applicationUri, "/");
         await AssertLocalBootstrapAsync(page, applicationUri);
         await VisitAsync(page, applicationUri, "/reports/dashboard");

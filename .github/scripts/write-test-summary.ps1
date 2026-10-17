@@ -34,6 +34,7 @@ $erpSummary.Add('')
 $erpSummary.Add('| Suite | Total | Executed | Passed | Failed | Not executed |')
 $erpSummary.Add('| --- | ---: | ---: | ---: | ---: | ---: |')
 $erpFailedNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+$erpBrowserDiagnostics = [System.Collections.Generic.Dictionary[string, string]]::new([System.StringComparer]::Ordinal)
 $erpTotal = 0L
 $erpExecuted = 0L
 $erpPassed = 0L
@@ -71,14 +72,40 @@ foreach ($erpReport in $erpReports) {
     $erpSummary.Add("| $erpSuite | $erpReportTotal | $erpReportExecuted | $erpReportPassed | $erpReportFailed | $erpReportNotExecuted |")
 
     foreach ($erpResult in $erpDocument.SelectNodes('/t:TestRun/t:Results/t:UnitTestResult[@outcome="Failed"]', $erpNamespaces)) {
-        $null = $erpFailedNames.Add($erpResult.GetAttribute('testName'))
+        $erpName = $erpResult.GetAttribute('testName')
+        $null = $erpFailedNames.Add($erpName)
+        if (-not $erpName.StartsWith('Erp.EndToEndTests.', [System.StringComparison]::Ordinal)) { continue }
+        $erpOutput = $erpResult.SelectSingleNode('t:Output/t:StdOut', $erpNamespaces)
+        if ($null -eq $erpOutput) { continue }
+
+        $erpPhase = $null
+        $erpLoginStatus = $null
+        $erpOutputReader = [System.IO.StringReader]::new($erpOutput.InnerText)
+        try {
+            while ($null -ne ($erpLine = $erpOutputReader.ReadLine())) {
+                if ($erpLine -cmatch '\AERP_E2E_PHASE=(playwright-create|chromium-launch|login-navigation|antiforgery-token|login-submit|workflow)\z') {
+                    $erpPhase = $Matches[1]
+                }
+                elseif ($erpLine -cmatch '\AERP_E2E_LOGIN_STATUS=([1-5][0-9]{2})\z') {
+                    $erpLoginStatus = $Matches[1]
+                }
+            }
+        }
+        finally { $erpOutputReader.Dispose() }
+
+        $erpLabels = [System.Collections.Generic.List[string]]::new()
+        if ($null -ne $erpPhase) { $erpLabels.Add("phase=$erpPhase") }
+        if ($null -ne $erpLoginStatus) { $erpLabels.Add("login-status=$erpLoginStatus") }
+        if ($erpLabels.Count -gt 0) { $erpBrowserDiagnostics[$erpName] = $erpLabels -join ' ' }
     }
 }
 
 $erpSummary.Add("| **Total** | **$erpTotal** | **$erpExecuted** | **$erpPassed** | **$erpFailed** | **$erpNotExecuted** |")
 foreach ($erpName in ($erpFailedNames | Sort-Object)) {
-    # Names only: do not publish exception messages, stack traces, SQL, or test payloads.
-    Write-Output "::error title=Failed test::$(ConvertTo-WorkflowMessage $erpName)"
+    # Publish only names and allowlisted browser labels, never raw output or exception payloads.
+    $erpMessage = $erpName
+    if ($erpBrowserDiagnostics.ContainsKey($erpName)) { $erpMessage += " [$($erpBrowserDiagnostics[$erpName])]" }
+    Write-Output "::error title=Failed test::$(ConvertTo-WorkflowMessage $erpMessage)"
 }
 if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_STEP_SUMMARY)) {
     $erpSummary | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8

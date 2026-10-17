@@ -64,6 +64,10 @@ The pipeline now reports unit, architecture, integration, and configured browser
 checks separately. Test-result files and dashboard screenshots are retained as
 diagnostic artifacts, and the runner is pinned to an explicit Ubuntu version.
 
+Browser checks now wait for HTTP readiness rather than just a running container.
+Failure annotations can include allowlisted setup-phase and HTTP-status labels,
+without echoing request bodies, credentials, or exception payloads.
+
 These changes improve failure visibility. They do not turn an unverified hosted
 run into a successful one or hide a failed assertion.
 
