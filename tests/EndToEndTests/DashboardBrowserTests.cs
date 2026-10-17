@@ -204,20 +204,26 @@ public sealed class DashboardBrowserTests(ITestOutputHelper output)
 
     private static async Task VerifyMobileNavigationAsync(IPage page)
     {
-        var menu = page.GetByRole(AriaRole.Button, new() { Name = "Menu", Exact = true });
+        var menu = page.Locator("button.menu-toggle[aria-controls='primary-sidebar']");
         await Assertions.Expect(menu).ToBeVisibleAsync();
+        await Assertions.Expect(menu).ToHaveAccessibleNameAsync("Open navigation");
+        await Assertions.Expect(menu).ToHaveAttributeAsync("aria-expanded", "false");
         await menu.ClickAsync();
+        await Assertions.Expect(menu).ToHaveAccessibleNameAsync("Close navigation");
         await Assertions.Expect(menu).ToHaveAttributeAsync("aria-expanded", "true");
         var sidebar = page.Locator("#primary-sidebar");
-        var close = sidebar.GetByRole(AriaRole.Button, new() { Name = "Close navigation", Exact = true });
-        await Assertions.Expect(close).ToBeFocusedAsync();
+        await Assertions.Expect(sidebar).ToBeFocusedAsync();
+        var firstControl = sidebar.Locator("a.brand");
+        await page.Keyboard.PressAsync("Tab");
+        await Assertions.Expect(firstControl).ToBeFocusedAsync();
         await page.Keyboard.PressAsync("Shift+Tab");
-        await Assertions.Expect(close).Not.ToBeFocusedAsync();
+        await Assertions.Expect(firstControl).Not.ToBeFocusedAsync();
         Assert.True(await sidebar.EvaluateAsync<bool>("element => element.contains(document.activeElement) && document.activeElement.checkVisibility()"), "Focus must wrap to a visible navigation control, not a link inside a collapsed group.");
         await page.Keyboard.PressAsync("Tab");
-        await Assertions.Expect(close).ToBeFocusedAsync();
+        await Assertions.Expect(firstControl).ToBeFocusedAsync();
         await AssertAccessibleAsync(page, "Mobile report dashboard with open navigation");
         await page.Keyboard.PressAsync("Escape");
+        await Assertions.Expect(menu).ToHaveAccessibleNameAsync("Open navigation");
         await Assertions.Expect(menu).ToHaveAttributeAsync("aria-expanded", "false");
         await Assertions.Expect(menu).ToBeFocusedAsync();
     }

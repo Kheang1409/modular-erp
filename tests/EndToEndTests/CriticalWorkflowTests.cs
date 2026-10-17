@@ -56,13 +56,25 @@ public sealed class CriticalWorkflowTests(ITestOutputHelper output)
         var productSku = $"E2E-{Guid.NewGuid():N}"[..16].ToUpperInvariant();
         await page.Locator("label").Filter(new() { HasText = "SKU" }).Locator("input").FillAsync(productSku);
         await page.Locator("label").Filter(new() { HasText = "Name" }).Locator("input").FillAsync("Browser workflow product");
-        await page.GetByRole(AriaRole.Button, new() { Name = "Save product" }).ClickAsync();
-        await page.WaitForURLAsync("**/products/*/details", new() { Timeout = 60_000 });
+        try
+        {
+            await page.GetByRole(AriaRole.Button, new() { Name = "Save product" }).ClickAsync();
+            await page.WaitForURLAsync("**/products/*/details", new() { Timeout = 60_000 });
+        }
+        catch (TimeoutException)
+        {
+            output.WriteLine($"ERP_E2E_PRODUCT_FAILURE_PATH={new Uri(page.Url).AbsolutePath}");
+            var validation = await page.Locator("main [role='alert'], main .validation-message, main .validation-summary").AllTextContentsAsync();
+            output.WriteLine($"ERP_E2E_PRODUCT_VALIDATION={string.Join(" | ", validation)}");
+            output.WriteLine($"ERP_E2E_BROWSER_ERRORS={string.Join(" | ", browserErrors)}");
+            throw;
+        }
         Assert.DoesNotContain("Product validation failed", await page.Locator("body").InnerTextAsync(), StringComparison.OrdinalIgnoreCase);
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Browser workflow product", Level = 1 })).ToBeVisibleAsync();
         var productAccessibility = await page.RunAxe();
         Assert.Empty(productAccessibility.Violations ?? []);
         await VerifyProductEditingAsync(page);
+        await CrmWorkflow.VerifyAsync(page, baseUrl);
 
         await page.GotoAsync(new Uri(new Uri(baseUrl), "/products").ToString());
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Products and services", Level = 1 })).ToBeVisibleAsync();
@@ -119,27 +131,40 @@ public sealed class CriticalWorkflowTests(ITestOutputHelper output)
         await Assertions.Expect(page.Locator(".shell")).ToHaveAttributeAsync("data-interactive", "true");
 
         await page.SetViewportSizeAsync(390, 844);
-        var menu = page.GetByRole(AriaRole.Button, new() { Name = "Menu" });
-        Assert.True(await menu.IsVisibleAsync());
+        var menu = page.Locator("button.menu-toggle[aria-controls='primary-sidebar']");
+        await Assertions.Expect(menu).ToBeVisibleAsync();
+        await Assertions.Expect(menu).ToHaveAccessibleNameAsync("Open navigation");
         await menu.ClickAsync();
         Assert.True(browserErrors.Count == 0, string.Join(Environment.NewLine, browserErrors));
         await Assertions.Expect(menu).ToHaveAttributeAsync("aria-expanded", "true");
+        await Assertions.Expect(menu).ToHaveAccessibleNameAsync("Close navigation");
         Assert.True(await page.GetByRole(AriaRole.Navigation, new() { Name = "Primary navigation" }).IsVisibleAsync());
-        var closeNavigation = page.Locator("#primary-sidebar").GetByRole(AriaRole.Button, new() { Name = "Close navigation", Exact = true });
-        await Assertions.Expect(closeNavigation).ToBeFocusedAsync();
-        await page.Keyboard.PressAsync("Shift+Tab");
-        Assert.True(await page.EvaluateAsync<bool>("() => document.querySelector('#primary-sidebar').contains(document.activeElement)"));
+        var sidebar = page.Locator("#primary-sidebar");
+        await Assertions.Expect(sidebar).ToBeFocusedAsync();
+        var firstNavigationControl = sidebar.Locator("a.brand");
         await page.Keyboard.PressAsync("Tab");
-        await Assertions.Expect(closeNavigation).ToBeFocusedAsync();
+        await Assertions.Expect(firstNavigationControl).ToBeFocusedAsync();
+        await page.Keyboard.PressAsync("Shift+Tab");
+        await Assertions.Expect(firstNavigationControl).Not.ToBeFocusedAsync();
+        Assert.True(await sidebar.EvaluateAsync<bool>("element => element.contains(document.activeElement) && document.activeElement.checkVisibility()"), "Focus must wrap to a visible navigation control.");
+        await page.Keyboard.PressAsync("Tab");
+        await Assertions.Expect(firstNavigationControl).ToBeFocusedAsync();
         var mobileAccessibility = await page.RunAxe();
         Assert.Empty(mobileAccessibility.Violations ?? []);
-        await page.Locator("#primary-sidebar").GetByRole(AriaRole.Button, new() { Name = "Close navigation", Exact = true }).ClickAsync();
+        var scrim = page.Locator("button.sidebar-scrim.is-visible");
+        await Assertions.Expect(scrim).ToHaveAccessibleNameAsync("Close navigation");
+        var scrimBounds = await scrim.BoundingBoxAsync();
+        Assert.NotNull(scrimBounds);
+        await scrim.ClickAsync(new() { Position = new() { X = scrimBounds.Width - 8, Y = 8 } });
         await Assertions.Expect(menu).ToHaveAttributeAsync("aria-expanded", "false");
+        await Assertions.Expect(menu).ToHaveAccessibleNameAsync("Open navigation");
         await Assertions.Expect(menu).ToBeFocusedAsync();
         await menu.ClickAsync();
         await Assertions.Expect(menu).ToHaveAttributeAsync("aria-expanded", "true");
+        await Assertions.Expect(menu).ToHaveAccessibleNameAsync("Close navigation");
         await page.Keyboard.PressAsync("Escape");
         await Assertions.Expect(menu).ToHaveAttributeAsync("aria-expanded", "false");
+        await Assertions.Expect(menu).ToHaveAccessibleNameAsync("Open navigation");
         await Assertions.Expect(menu).ToBeFocusedAsync();
         foreach (var route in new[] { "/organization", "/administration/users", "/administration/roles", "/administration/data-maintenance" })
         {
@@ -161,6 +186,7 @@ public sealed class CriticalWorkflowTests(ITestOutputHelper output)
 
     private static async Task VerifyProductEditingAsync(IPage page)
     {
+        await Assertions.Expect(page.Locator(".shell")).ToHaveAttributeAsync("data-interactive", "true");
         await page.GetByRole(AriaRole.Link, new() { Name = "Edit product", Exact = true }).ClickAsync();
         await Assertions.Expect(page.Locator(".shell")).ToHaveAttributeAsync("data-interactive", "true");
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Edit product", Level = 1, Exact = true })).ToBeVisibleAsync();
@@ -178,7 +204,10 @@ public sealed class CriticalWorkflowTests(ITestOutputHelper output)
 
         foreach (var action in new[] { (Button: "Archive", Status: "Archived"), (Button: "Reactivate", Status: "Active") })
         {
+            // A force-loaded details page can render its links before the new circuit is ready.
+            await Assertions.Expect(page.Locator(".shell")).ToHaveAttributeAsync("data-interactive", "true");
             await page.GetByRole(AriaRole.Link, new() { Name = "Edit product", Exact = true }).ClickAsync();
+            await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Edit product", Level = 1, Exact = true })).ToBeVisibleAsync();
             await Assertions.Expect(page.Locator(".shell")).ToHaveAttributeAsync("data-interactive", "true");
             await page.GetByRole(AriaRole.Button, new() { Name = action.Button, Exact = true }).ClickAsync();
             await page.WaitForURLAsync("**/products/*/details");
