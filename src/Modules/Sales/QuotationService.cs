@@ -5,6 +5,7 @@ using Erp.Abstractions.Context;
 using Erp.Abstractions.Currencies;
 using Erp.Abstractions.Sequences;
 using Erp.Abstractions.Events;
+using Erp.Abstractions.Persistence;
 using Erp.Modules.Contacts.Contracts;
 using Erp.Modules.Products.Contracts;
 using Microsoft.AspNetCore.Http;
@@ -22,7 +23,10 @@ public interface IQuotationService
     Task<QuotationDto> SetArchivedAsync(Guid id, string stamp, bool archived, CancellationToken token);
 }
 
-public sealed class QuotationService(SalesDbContext database, ITenantContext tenant, ICompanyContext company, IContactDirectory contacts, IProductDirectory products, ICurrencyConfigurationService currencies, ISequenceService sequences, IClock clock, IAuditLogWriter audit, IOutboxWriter outbox, IHttpContextAccessor http) : IQuotationService
+public sealed class QuotationService(SalesDbContext database, ITenantContext tenant, ICompanyContext company,
+    IContactDirectory contacts, IProductDirectory products, ICurrencyConfigurationService currencies,
+    ISequenceService sequences, IClock clock, IAuditLogWriter audit, IOutboxWriter outbox, IHttpContextAccessor http,
+    IBusinessTransactionCoordinator transactions) : IQuotationService
 {
     public async Task<QuotationPage> SearchAsync(QuotationQuery query, CancellationToken token)
     {
@@ -35,27 +39,58 @@ public sealed class QuotationService(SalesDbContext database, ITenantContext ten
     public async Task<QuotationDto?> GetAsync(Guid id, CancellationToken token) => (await database.Quotations.AsNoTracking().Include(x => x.Lines).SingleOrDefaultAsync(x => x.Id == id, token)) is { } item ? Dto(item) : null;
     public async Task<QuotationDto> CreateAsync(QuotationRequest request, CancellationToken token)
     {
-        Validate(request, false); var customer = await Customer(request.CustomerId, token); var currency = await Currency(request.CurrencyCode, request.QuotationDate, token); var now = clock.UtcNow;
+        Validate(request, false);
+        await using var transaction = await transactions.BeginAsync(database, token);
+        var customer = await Customer(request.CustomerId, token); var currency = await Currency(request.CurrencyCode, request.QuotationDate, token); var now = clock.UtcNow;
         var item = new Quotation { Id = Guid.NewGuid(), TenantId = Tenant(), CompanyId = Company(), Number = await sequences.NextAsync(new("sales.quotation", "QUO-{yyyy}-", 6, request.QuotationDate), token), CustomerId = customer.Id, CustomerName = customer.DisplayName, CurrencyCode = currency.code, BaseCurrencyCode = currency.baseCode, ExchangeRate = currency.rate, QuotationDate = request.QuotationDate, ValidUntil = request.ValidUntil, State = QuotationState.Draft, Notes = Clean(request.Notes), Terms = Clean(request.Terms), CreatedAtUtc = now, UpdatedAtUtc = now, CreatedBy = User(), UpdatedBy = User(), ConcurrencyStamp = Stamp() };
-        item.Lines = await BuildLines(item, request.Lines, token); Calculate(item); database.Quotations.Add(item); await Save(token); outbox.Add(new QuotationCreatedEvent(Guid.NewGuid(), clock.UtcNow, item.Id, item.Number, item.CustomerId, item.CurrencyCode, item.Total)); await Audit("sales.quotation.created", item, token); return Dto(item);
+        item.Lines = await BuildLines(item, request.Lines, token); Calculate(item); database.Quotations.Add(item); await Save(token); outbox.Add(new QuotationCreatedEvent(Guid.NewGuid(), clock.UtcNow, item.Id, item.Number, item.CustomerId, item.CurrencyCode, item.Total)); await Audit("sales.quotation.created", item, token);
+        var result = Dto(item);
+        await transaction.CommitAsync(token);
+        return result;
     }
     public async Task<QuotationDto> UpdateAsync(Guid id, QuotationRequest request, CancellationToken token)
     {
-        Validate(request, true); var item = await Find(id, token); Check(item, request.ConcurrencyStamp!); if (item.State != QuotationState.Draft) throw Error("state", "Only draft quotations can be edited.");
+        Validate(request, true);
+        await using var transaction = await transactions.BeginAsync(database, token);
+        var item = await Find(id, token); Check(item, request.ConcurrencyStamp!); if (item.State != QuotationState.Draft) throw Error("state", "Only draft quotations can be edited.");
         var customer = await Customer(request.CustomerId, token); var currency = await Currency(request.CurrencyCode, request.QuotationDate, token); database.QuotationLines.RemoveRange(item.Lines);
-        item.CustomerId = customer.Id; item.CustomerName = customer.DisplayName; item.CurrencyCode = currency.code; item.BaseCurrencyCode = currency.baseCode; item.ExchangeRate = currency.rate; item.QuotationDate = request.QuotationDate; item.ValidUntil = request.ValidUntil; item.Notes = Clean(request.Notes); item.Terms = Clean(request.Terms); item.Lines = await BuildLines(item, request.Lines, token); Touch(item); Calculate(item); await Save(token); await Audit("sales.quotation.updated", item, token); return Dto(item);
+        item.CustomerId = customer.Id; item.CustomerName = customer.DisplayName; item.CurrencyCode = currency.code; item.BaseCurrencyCode = currency.baseCode; item.ExchangeRate = currency.rate; item.QuotationDate = request.QuotationDate; item.ValidUntil = request.ValidUntil; item.Notes = Clean(request.Notes); item.Terms = Clean(request.Terms);
+        item.Lines = await BuildLines(item, request.Lines, token);
+        database.QuotationLines.AddRange(item.Lines);
+        Touch(item); Calculate(item); await Save(token); await Audit("sales.quotation.updated", item, token);
+        var result = Dto(item);
+        await transaction.CommitAsync(token);
+        return result;
     }
     public async Task<QuotationDto> TransitionAsync(Guid id, QuotationState state, string stamp, CancellationToken token)
     {
-        var item = await Find(id, token); Check(item, stamp); var allowed = (item.State, state) switch { (QuotationState.Draft, QuotationState.Sent) => true, (QuotationState.Sent, QuotationState.Accepted or QuotationState.Rejected) => true, (QuotationState.Draft or QuotationState.Sent, QuotationState.Cancelled) => true, (QuotationState.Draft or QuotationState.Sent, QuotationState.Expired) => item.ValidUntil is not null && item.ValidUntil < DateOnly.FromDateTime(clock.UtcNow.UtcDateTime), _ => false }; if (!allowed) throw Error("state", $"Cannot move quotation from {item.State} to {state}."); item.State = state; Touch(item); await Save(token); if (state == QuotationState.Sent) outbox.Add(new QuotationSentEvent(Guid.NewGuid(), clock.UtcNow, item.Id, item.Number)); if (state == QuotationState.Accepted) outbox.Add(new QuotationAcceptedEvent(Guid.NewGuid(), clock.UtcNow, item.Id, item.Number, item.CustomerId, item.CurrencyCode, item.Total)); await Audit($"sales.quotation.{state.ToString().ToLowerInvariant()}", item, token); return Dto(item);
+        await using var transaction = await transactions.BeginAsync(database, token);
+        var item = await Find(id, token); Check(item, stamp); var allowed = (item.State, state) switch { (QuotationState.Draft, QuotationState.Sent) => true, (QuotationState.Sent, QuotationState.Accepted or QuotationState.Rejected) => true, (QuotationState.Draft or QuotationState.Sent, QuotationState.Cancelled) => true, (QuotationState.Draft or QuotationState.Sent, QuotationState.Expired) => item.ValidUntil is not null && item.ValidUntil < DateOnly.FromDateTime(clock.UtcNow.UtcDateTime), _ => false }; if (!allowed) throw Error("state", $"Cannot move quotation from {item.State} to {state}."); item.State = state; Touch(item); await Save(token); if (state == QuotationState.Sent) outbox.Add(new QuotationSentEvent(Guid.NewGuid(), clock.UtcNow, item.Id, item.Number)); if (state == QuotationState.Accepted) outbox.Add(new QuotationAcceptedEvent(Guid.NewGuid(), clock.UtcNow, item.Id, item.Number, item.CustomerId, item.CurrencyCode, item.Total)); await Audit($"sales.quotation.{state.ToString().ToLowerInvariant()}", item, token);
+        var result = Dto(item);
+        await transaction.CommitAsync(token);
+        return result;
     }
-    public async Task<QuotationDto> SetArchivedAsync(Guid id, string stamp, bool archived, CancellationToken token) { var item = await Find(id, token); Check(item, stamp); if (archived && item.State is QuotationState.Draft or QuotationState.Sent) throw Error("state", "Active quotations must be cancelled before archiving."); item.IsArchived = archived; Touch(item); await Save(token); await Audit(archived ? "sales.quotation.archived" : "sales.quotation.reactivated", item, token); return Dto(item); }
+    public async Task<QuotationDto> SetArchivedAsync(Guid id, string stamp, bool archived, CancellationToken token)
+    {
+        await using var transaction = await transactions.BeginAsync(database, token);
+        var item = await Find(id, token); Check(item, stamp); if (archived && item.State is QuotationState.Draft or QuotationState.Sent) throw Error("state", "Active quotations must be cancelled before archiving."); item.IsArchived = archived; Touch(item); await Save(token); await Audit(archived ? "sales.quotation.archived" : "sales.quotation.reactivated", item, token);
+        var result = Dto(item);
+        await transaction.CommitAsync(token);
+        return result;
+    }
 
     internal static (decimal subtotal, decimal discount, decimal tax, decimal total) CalculateLine(decimal quantity, decimal price, decimal discountPercent, decimal taxPercent)
     { if (quantity <= 0 || price < 0 || discountPercent is < 0 or > 100 || taxPercent is < 0 or > 100) throw Error("lines", "Quantity, price, discount, or tax is invalid."); var subtotal = Round(quantity * price); var discount = Round(subtotal * discountPercent / 100m); var tax = Round((subtotal - discount) * taxPercent / 100m); return (subtotal, discount, tax, Round(subtotal - discount + tax)); }
     private async Task<List<QuotationLine>> BuildLines(Quotation owner, IReadOnlyList<QuotationLineRequest> requests, CancellationToken token)
     {
-        var ids = requests.Select(x => x.ProductId).Distinct().ToArray(); var references = await products.FindAsync(ids, token); var lines = new List<QuotationLine>(); var sequence = 0;
+        var ids = requests.Select(x => x.ProductId).Distinct().ToArray();
+        var references = new Dictionary<Guid, ProductReference>();
+        foreach (var batch in ids.Chunk(100))
+        {
+            var batchReferences = await products.FindAsync(batch, token);
+            foreach (var reference in batchReferences) references[reference.Key] = reference.Value;
+        }
+        var lines = new List<QuotationLine>(); var sequence = 0;
         foreach (var request in requests) { if (!references.TryGetValue(request.ProductId, out var product) || product.IsArchived) throw Error("lines", "Every product must exist and be active in the current company."); if (!StringComparer.OrdinalIgnoreCase.Equals(product.CurrencyCode, owner.CurrencyCode) && request.UnitPrice is null) throw Error("lines", "A unit price is required when product and quotation currencies differ."); var price = request.UnitPrice ?? product.SalePrice; var values = CalculateLine(request.Quantity, price, request.DiscountPercent, request.TaxPercent); lines.Add(new() { Id = Guid.NewGuid(), TenantId = owner.TenantId, CompanyId = owner.CompanyId, QuotationId = owner.Id, Sequence = ++sequence, ProductId = product.Id, ProductSku = product.Sku, Description = string.IsNullOrWhiteSpace(request.Description) ? product.Name : request.Description.Trim(), UnitCode = product.SalesUnitCode, Quantity = request.Quantity, UnitPrice = price, DiscountPercent = request.DiscountPercent, TaxPercent = request.TaxPercent, Subtotal = values.subtotal, DiscountAmount = values.discount, TaxAmount = values.tax, Total = values.total }); }
         return lines;
     }

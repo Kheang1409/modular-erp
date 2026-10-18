@@ -2,11 +2,21 @@ using Erp.Abstractions.Events;
 using Erp.Abstractions.Modules;
 using Erp.ModuleSystem;
 using Erp.Modules.Sales;
+using Microsoft.EntityFrameworkCore;
 
 namespace Erp.UnitTests;
 
 public sealed class SalesModuleTests
 {
+    [Fact]
+    public void SalesModelMatchesMigrationsSnapshot()
+    {
+        using var database = new SalesDbContext(new DbContextOptionsBuilder<SalesDbContext>()
+            .UseNpgsql("Host=localhost;Database=model_only;Username=erp").Options);
+
+        Assert.False(database.Database.HasPendingModelChanges());
+    }
+
     [Fact]
     public void ManifestDeclaresDependenciesPermissionsAndEvents()
     {

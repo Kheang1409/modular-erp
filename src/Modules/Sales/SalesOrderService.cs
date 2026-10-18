@@ -3,6 +3,7 @@ using System.Text.Json;
 using Erp.Abstractions.Auditing;
 using Erp.Abstractions.Context;
 using Erp.Abstractions.Events;
+using Erp.Abstractions.Persistence;
 using Erp.Abstractions.Sequences;
 using Erp.Modules.Contacts.Contracts;
 using Microsoft.AspNetCore.Http;
@@ -18,7 +19,9 @@ public interface ISalesOrderService
     Task<SalesOrderDto> TransitionAsync(Guid id, SalesOrderState target, string stamp, CancellationToken token);
 }
 
-public sealed class SalesOrderService(SalesDbContext database, ITenantContext tenant, ICompanyContext company, ICustomerDocumentDirectory customers, ISequenceService sequences, IClock clock, IAuditLogWriter audit, IOutboxWriter outbox, IHttpContextAccessor http) : ISalesOrderService
+public sealed class SalesOrderService(SalesDbContext database, ITenantContext tenant, ICompanyContext company,
+    ICustomerDocumentDirectory customers, ISequenceService sequences, IClock clock, IAuditLogWriter audit,
+    IOutboxWriter outbox, IHttpContextAccessor http, IBusinessTransactionCoordinator transactions) : ISalesOrderService
 {
     public async Task<SalesOrderPage> SearchAsync(SalesOrderQuery query, CancellationToken token)
     {
@@ -28,11 +31,75 @@ public sealed class SalesOrderService(SalesDbContext database, ITenantContext te
     public async Task<SalesOrderDto?> GetAsync(Guid id, CancellationToken token) => (await database.SalesOrders.AsNoTracking().Include(x => x.Lines).SingleOrDefaultAsync(x => x.Id == id, token)) is { } item ? Dto(item) : null;
     public async Task<SalesOrderDto> ConvertAsync(Guid quotationId, ConvertQuotationRequest request, CancellationToken token)
     {
-        var quote = await database.Quotations.Include(x => x.Lines).SingleOrDefaultAsync(x => x.Id == quotationId, token) ?? throw new KeyNotFoundException(); if (!StringComparer.Ordinal.Equals(quote.ConcurrencyStamp, request.ConcurrencyStamp)) throw new SalesConcurrencyException(); if (quote.State != QuotationState.Accepted) throw Error("state", "Only accepted quotations can become sales orders."); if (request.OrderDate == default) throw Error("orderDate", "Order date is required."); if (await database.SalesOrders.AnyAsync(x => x.SourceQuotationId == quotationId, token)) throw Error("quotationId", "This quotation already has a sales order."); var customer = await customers.FindAsync(quote.CustomerId, token); if (customer is null) throw Error("customerId", "Customer snapshot data is unavailable."); var now = clock.UtcNow; var order = new SalesOrder { Id = Guid.NewGuid(), TenantId = Tenant(), CompanyId = Company(), SourceQuotationId = quote.Id, Number = await sequences.NextAsync(new("sales.order", "SO-{yyyy}-", 6, request.OrderDate), token), CustomerId = customer.Id, CustomerName = customer.DisplayName, CustomerTaxNumber = customer.TaxNumber, CurrencyCode = quote.CurrencyCode, BaseCurrencyCode = quote.BaseCurrencyCode, ExchangeRate = quote.ExchangeRate, OrderDate = request.OrderDate, State = SalesOrderState.Draft, Subtotal = quote.Subtotal, DiscountTotal = quote.DiscountTotal, TaxTotal = quote.TaxTotal, Total = quote.Total, Notes = quote.Notes, Terms = quote.Terms, CreatedAtUtc = now, UpdatedAtUtc = now, CreatedBy = User(), UpdatedBy = User(), ConcurrencyStamp = Stamp() }; Copy(customer.BillingAddress, order, true); Copy(customer.ShippingAddress, order, false); order.Lines = quote.Lines.OrderBy(x => x.Sequence).Select(x => new SalesOrderLine { Id = Guid.NewGuid(), TenantId = order.TenantId, CompanyId = order.CompanyId, SalesOrderId = order.Id, Sequence = x.Sequence, ProductId = x.ProductId, ProductSku = x.ProductSku, Description = x.Description, UnitCode = x.UnitCode, Quantity = x.Quantity, UnitPrice = x.UnitPrice, DiscountPercent = x.DiscountPercent, TaxPercent = x.TaxPercent, Subtotal = x.Subtotal, DiscountAmount = x.DiscountAmount, TaxAmount = x.TaxAmount, Total = x.Total }).ToList(); database.SalesOrders.Add(order); await Save(token); await Audit("sales.order.created", order, token); return Dto(order);
+        await using var transaction = await transactions.BeginAsync(database, token);
+        var quote = await database.Quotations.Include(x => x.Lines).SingleOrDefaultAsync(x => x.Id == quotationId, token) ?? throw new KeyNotFoundException();
+        if (!StringComparer.Ordinal.Equals(quote.ConcurrencyStamp, request.ConcurrencyStamp)) throw new SalesConcurrencyException();
+        if (quote.State != QuotationState.Accepted) throw Error("state", "Only accepted quotations can become sales orders.");
+        if (request.OrderDate == default) throw Error("orderDate", "Order date is required.");
+        if (await database.SalesOrders.AnyAsync(x => x.SourceQuotationId == quotationId, token)) throw Error("quotationId", "This quotation already has a sales order.");
+        var customer = await customers.FindAsync(quote.CustomerId, token);
+        if (customer is null) throw Error("customerId", "Customer snapshot data is unavailable.");
+        var now = clock.UtcNow;
+        var order = new SalesOrder
+        {
+            Id = Guid.NewGuid(),
+            TenantId = Tenant(),
+            CompanyId = Company(),
+            SourceQuotationId = quote.Id,
+            Number = await sequences.NextAsync(new("sales.order", "SO-{yyyy}-", 6, request.OrderDate), token),
+            CustomerId = customer.Id,
+            CustomerName = customer.DisplayName,
+            CustomerTaxNumber = customer.TaxNumber,
+            CurrencyCode = quote.CurrencyCode,
+            BaseCurrencyCode = quote.BaseCurrencyCode,
+            ExchangeRate = quote.ExchangeRate,
+            OrderDate = request.OrderDate,
+            State = SalesOrderState.Draft,
+            Subtotal = quote.Subtotal,
+            DiscountTotal = quote.DiscountTotal,
+            TaxTotal = quote.TaxTotal,
+            Total = quote.Total,
+            Notes = quote.Notes,
+            Terms = quote.Terms,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+            CreatedBy = User(),
+            UpdatedBy = User(),
+            ConcurrencyStamp = Stamp()
+        };
+        Copy(customer.BillingAddress, order, true); Copy(customer.ShippingAddress, order, false);
+        order.Lines = quote.Lines.OrderBy(x => x.Sequence).Select(x => new SalesOrderLine
+        {
+            Id = Guid.NewGuid(),
+            TenantId = order.TenantId,
+            CompanyId = order.CompanyId,
+            SalesOrderId = order.Id,
+            Sequence = x.Sequence,
+            ProductId = x.ProductId,
+            ProductSku = x.ProductSku,
+            Description = x.Description,
+            UnitCode = x.UnitCode,
+            Quantity = x.Quantity,
+            UnitPrice = x.UnitPrice,
+            DiscountPercent = x.DiscountPercent,
+            TaxPercent = x.TaxPercent,
+            Subtotal = x.Subtotal,
+            DiscountAmount = x.DiscountAmount,
+            TaxAmount = x.TaxAmount,
+            Total = x.Total
+        }).ToList();
+        database.SalesOrders.Add(order); await Save(token); await Audit("sales.order.created", order, token);
+        var result = Dto(order);
+        await transaction.CommitAsync(token);
+        return result;
     }
     public async Task<SalesOrderDto> TransitionAsync(Guid id, SalesOrderState target, string stamp, CancellationToken token)
     {
-        var item = await database.SalesOrders.Include(x => x.Lines).SingleOrDefaultAsync(x => x.Id == id, token) ?? throw new KeyNotFoundException(); if (!StringComparer.Ordinal.Equals(item.ConcurrencyStamp, stamp)) throw new SalesConcurrencyException(); var allowed = (item.State, target) switch { (SalesOrderState.Draft, SalesOrderState.Confirmed) => true, (SalesOrderState.Draft or SalesOrderState.Confirmed, SalesOrderState.Cancelled) => true, _ => false }; if (!allowed) throw Error("state", $"Cannot move sales order from {item.State} to {target}."); item.State = target; item.UpdatedAtUtc = clock.UtcNow; item.UpdatedBy = User(); item.ConcurrencyStamp = Stamp(); await Save(token); if (target == SalesOrderState.Confirmed) outbox.Add(new SalesOrderConfirmedEvent(Guid.NewGuid(), clock.UtcNow, item.Id, item.Number, item.CustomerId, item.CurrencyCode, item.Total)); else outbox.Add(new SalesOrderCancelledEvent(Guid.NewGuid(), clock.UtcNow, item.Id, item.Number)); await Audit($"sales.order.{target.ToString().ToLowerInvariant()}", item, token); return Dto(item);
+        await using var transaction = await transactions.BeginAsync(database, token);
+        var item = await database.SalesOrders.Include(x => x.Lines).SingleOrDefaultAsync(x => x.Id == id, token) ?? throw new KeyNotFoundException(); if (!StringComparer.Ordinal.Equals(item.ConcurrencyStamp, stamp)) throw new SalesConcurrencyException(); var allowed = (item.State, target) switch { (SalesOrderState.Draft, SalesOrderState.Confirmed) => true, (SalesOrderState.Draft or SalesOrderState.Confirmed, SalesOrderState.Cancelled) => true, _ => false }; if (!allowed) throw Error("state", $"Cannot move sales order from {item.State} to {target}."); item.State = target; item.UpdatedAtUtc = clock.UtcNow; item.UpdatedBy = User(); item.ConcurrencyStamp = Stamp(); await Save(token); if (target == SalesOrderState.Confirmed) outbox.Add(new SalesOrderConfirmedEvent(Guid.NewGuid(), clock.UtcNow, item.Id, item.Number, item.CustomerId, item.CurrencyCode, item.Total)); else outbox.Add(new SalesOrderCancelledEvent(Guid.NewGuid(), clock.UtcNow, item.Id, item.Number)); await Audit($"sales.order.{target.ToString().ToLowerInvariant()}", item, token);
+        var result = Dto(item);
+        await transaction.CommitAsync(token);
+        return result;
     }
     private static void Copy(ContactAddressReference value, SalesOrder order, bool billing) { if (billing) { order.BillingLine1 = value.Line1; order.BillingLine2 = value.Line2; order.BillingCity = value.City; order.BillingStateOrProvince = value.StateOrProvince; order.BillingPostalCode = value.PostalCode; order.BillingCountryCode = value.CountryCode; } else { order.ShippingLine1 = value.Line1; order.ShippingLine2 = value.Line2; order.ShippingCity = value.City; order.ShippingStateOrProvince = value.StateOrProvince; order.ShippingPostalCode = value.PostalCode; order.ShippingCountryCode = value.CountryCode; } }
     private async Task Save(CancellationToken token) { try { await database.SaveChangesAsync(token); } catch (DbUpdateConcurrencyException) { throw new SalesConcurrencyException(); } catch (DbUpdateException) { throw Error("conflict", "The quotation was already converted or the order number conflicts."); } }

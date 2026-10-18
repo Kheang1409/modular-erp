@@ -1,10 +1,13 @@
 using Erp.Abstractions.Context;
+using Erp.Abstractions.Persistence;
+using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Erp.Modules.Sales;
 
-public sealed class SalesDbContext(DbContextOptions<SalesDbContext> options, ITenantContext? tenant = null, ICompanyContext? company = null) : DbContext(options)
+public sealed class SalesDbContext(DbContextOptions<SalesDbContext> options, ITenantContext? tenant = null, ICompanyContext? company = null) : DbContext(options), ITransactionParticipant
 {
     private readonly ITenantContext? _tenant = tenant;
     private readonly ICompanyContext? _company = company;
@@ -14,6 +17,19 @@ public sealed class SalesDbContext(DbContextOptions<SalesDbContext> options, ITe
     public DbSet<QuotationLine> QuotationLines => Set<QuotationLine>();
     public DbSet<SalesOrder> SalesOrders => Set<SalesOrder>();
     public DbSet<SalesOrderLine> SalesOrderLines => Set<SalesOrderLine>();
+
+    DbConnection ITransactionParticipant.Connection => Database.GetDbConnection();
+    bool ITransactionParticipant.HasPendingChanges => ChangeTracker.HasChanges();
+
+    async Task ITransactionParticipant.EnlistAsync(DbTransaction? transaction, CancellationToken cancellationToken)
+    {
+        if (transaction is not null && Database.CurrentTransaction is { } current &&
+            !ReferenceEquals(current.GetDbTransaction(), transaction))
+            throw new InvalidOperationException("An unrelated Sales transaction is already active.");
+        _ = await Database.UseTransactionAsync(transaction, cancellationToken);
+    }
+
+    void ITransactionParticipant.DiscardChanges() => ChangeTracker.Clear();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
