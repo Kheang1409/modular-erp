@@ -1,5 +1,32 @@
 @page "/sales/orders/{Id:guid}"
 @attribute [Authorize(Policy=SalesPermissions.OrderRead)]
 @inject ISalesOrderService Orders
-<PageTitle>Sales order</PageTitle><article class="card contacts-card">@if(_item is null){<p>Loading or not found...</p>}else{<p class="eyebrow">@_item.State</p><h1>@_item.Number</h1><p>@_item.CustomerName · @_item.OrderDate</p><h2>Shipping address</h2><p>@_item.ShippingAddress.Line1<br/>@_item.ShippingAddress.City @_item.ShippingAddress.PostalCode<br/>@_item.ShippingAddress.CountryCode</p><table><thead><tr><th>Product</th><th>Quantity</th><th>Price</th><th>Total</th></tr></thead><tbody>@foreach(var line in _item.Lines){<tr><td>@line.ProductSku — @line.Description</td><td>@line.Quantity @line.UnitCode</td><td>@line.UnitPrice</td><td>@line.Total</td></tr>}</tbody></table><p><strong>Total: @_item.Total @_item.CurrencyCode</strong></p><p>@if(_item.State==SalesOrderState.Draft){<a href="@($"/sales/orders/{Id}/confirm")">Confirm</a>} @if(_item.State is SalesOrderState.Draft or SalesOrderState.Confirmed){<a href="@($"/sales/orders/{Id}/cancel")">Cancel</a>} <a href="/sales/orders">Back</a></p>}</article>
+<PageTitle>Sales order</PageTitle>
+<article class="card contacts-card">
+    @if (_item is null)
+    {
+        <p>Loading or not found...</p>
+    }
+    else
+    {
+        <p class="eyebrow">@_item.State</p><h1>@_item.Number</h1>
+        <p>@_item.CustomerName · @_item.OrderDate</p>
+        <h2>Shipping address</h2>
+        <p>@_item.ShippingAddress.Line1<br />@_item.ShippingAddress.City @_item.ShippingAddress.PostalCode<br />@_item.ShippingAddress.CountryCode</p>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="Sales order lines">
+            <table>
+                <caption>Sales order lines</caption>
+                <thead><tr><th scope="col">Product</th><th scope="col">Quantity</th><th scope="col">Price</th><th scope="col">Total</th></tr></thead>
+                <tbody>
+                    @foreach (var line in _item.Lines)
+                    {
+                        <tr><td>@line.ProductSku — @line.Description</td><td>@line.Quantity @line.UnitCode</td><td>@line.UnitPrice</td><td>@line.Total</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <p><strong>Total: @_item.Total @_item.CurrencyCode</strong></p>
+        <p>@if (_item.State == SalesOrderState.Draft) { <a href="@($"/sales/orders/{Id}/confirm")">Confirm</a> } @if (_item.State is SalesOrderState.Draft or SalesOrderState.Confirmed) { <a href="@($"/sales/orders/{Id}/cancel")">Cancel</a> } <a href="/sales/orders">Back</a></p>
+    }
+</article>
 @code{[Parameter]public Guid Id{get;set;}private SalesOrderDto? _item;protected override async Task OnParametersSetAsync()=>_item=await Orders.GetAsync(Id,CancellationToken.None);}
