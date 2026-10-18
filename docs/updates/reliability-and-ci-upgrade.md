@@ -61,6 +61,32 @@ filtered a projected record that PostgreSQL's EF provider could not translate.
 Filtering and ordering now happen before the final record projection, retaining
 the same tenant/company membership checks while making assignment usable.
 
+## Sales: documents, numbers, and events together
+
+Sales now joins the same transaction boundary. Creating or editing a quotation,
+changing its state, archiving/reactivating it, converting it into an order, and
+confirming/cancelling an order commit with their audit records and applicable
+outbox events. The existing five versioned Sales event contracts stay unchanged.
+
+Document numbering is part of that operation too. If a transaction rolls back
+after allocation or an audit flush, the document, its lines, its sequence changes,
+and its audit/outbox records roll back together. This is not a promise of exactly-once
+event delivery or a legal gapless-numbering guarantee; the outbox keeps its existing
+delivery semantics.
+
+The upgrade preserves server-calculated totals, customer/address snapshots,
+optimistic concurrency, and the database uniqueness rule for quotation conversion.
+Product lookup also respects its directory boundary: sequential batches of 100 IDs
+support the existing 500-line limit without making an oversized directory request.
+No database migration or permission expansion is required.
+
+The PostgreSQL checks also exposed a real draft-editing defect: replacement lines
+with preassigned IDs were being treated as existing rows, producing a false
+concurrency error. Explicitly staging those lines as new rows fixes the edit path;
+regressions exercise repeated replacements and failures after deleting old lines.
+Sales detail tables now use the application's named, keyboard-accessible scrolling
+container to keep wide line items usable on mobile.
+
 ## Verification should be real, not a passing no-op
 
 Integration tests now require disposable PostgreSQL and storage containers. If

@@ -36,10 +36,12 @@ and `IBusinessTransactionCoordinator`; a module implements `ITransactionParticip
 using its own DbContext. Modules never access platform entities or another
 module's schema to participate.
 
-Contacts, Products, and CRM have adopted this boundary. Their mutations share
+Contacts, Products, CRM, and Sales have adopted this boundary. Their mutations share
 one physical connection and transaction with platform audit and any staged
 outbox messages. CRM also covers stages, assignments, activity completion/reopening,
-and lead conversion with both audit entries. The coordinator flushes pending
+and lead conversion with both audit entries. Sales includes quotation/order
+headers and lines, transactional number allocation, and its existing outbox events.
+The coordinator flushes pending
 platform changes before committing. Ordinary Contacts and Products CSV imports
 preserve independent transactions per valid row.
 Other writable modules retain their existing boundaries until explicitly migrated;
@@ -72,7 +74,7 @@ The decision identifiers are retained here as a consolidated architecture record
 | ADR-002: PostgreSQL | PostgreSQL is the production persistence provider. Integration tests exercise the actual provider through Testcontainers. |
 | ADR-003: Module contracts | Modules implement `IErpModule` and depend on public abstractions and contracts. Trusted assemblies are composed before building the service provider; hot unloading is excluded. |
 | ADR-004: Shared-database tenancy | Tenant identifiers, centralized query filters, cross-tenant write guards, and company-scoped business records isolate organizations and companies in shared schemas. |
-| ADR-005: Transactional outbox | Integration events are persisted in the same PostgreSQL transaction as business changes and dispatched asynchronously through platform contracts. |
+| ADR-005: Transactional outbox | Enlisted modules persist integration events in the same PostgreSQL transaction as business changes; remaining writable modules still require explicit adoption. Events are dispatched asynchronously through platform contracts. |
 | ADR-006: Blazor | Razor Components provide server-rendered pages and Interactive Server behavior. Module component assemblies participate in host routing. |
 | ADR-007: Accounting immutability | Posted journal entries and lines are immutable; corrections use balanced reversals and retain their audit relationship. |
 

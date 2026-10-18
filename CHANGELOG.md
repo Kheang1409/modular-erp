@@ -4,6 +4,10 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## 0.1.0 - unreleased
 
+- Extended coordinated PostgreSQL transactions to quotation/order writes, document numbering, audit records, and the existing Sales outbox events without schema, permission, or event-contract changes.
+- Batched Sales product lookups sequentially within the directory's 100-ID limit while retaining the 500-line quotation limit.
+- Fixed false quotation-edit concurrency errors by explicitly adding replacement line entities, and contained Sales detail tables in named keyboard-accessible scroll regions.
+- Added real-PostgreSQL Sales rollback/retry, event-payload, sequence, line-replacement, conversion-race, and company-isolation regressions, plus quotation-to-order browser workflows.
 - Extended shared PostgreSQL transactions to all CRM mutations: leads, opportunity conversion, pipeline stages, assignments, opportunity transitions, and activity completion/reopening, including audit flushes and explicitly staged outbox messages without schema or event-contract changes.
 - Added real-PostgreSQL CRM rollback/retry and conversion regressions, shared-session registration/model checks, and browser coverage for CRM configuration and sales-pipeline workflows.
 - Fixed company-user lookup and ordering queries to filter/sort before DTO projection, restoring PostgreSQL-backed CRM assignment without changing tenant/company membership checks.
