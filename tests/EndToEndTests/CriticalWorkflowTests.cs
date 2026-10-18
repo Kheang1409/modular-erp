@@ -1,10 +1,11 @@
+using System.Text.RegularExpressions;
 using Deque.AxeCore.Playwright;
 using Microsoft.Playwright;
 using Xunit.Abstractions;
 
 namespace Erp.EndToEndTests;
 
-public sealed class CriticalWorkflowTests(ITestOutputHelper output)
+public sealed partial class CriticalWorkflowTests(ITestOutputHelper output)
 {
     [Fact]
     public async Task AuthenticatedNavigationAndInventoryWorkAcrossDesktopAndMobile()
@@ -59,7 +60,7 @@ public sealed class CriticalWorkflowTests(ITestOutputHelper output)
         try
         {
             await page.GetByRole(AriaRole.Button, new() { Name = "Save product" }).ClickAsync();
-            await page.WaitForURLAsync("**/products/*/details", new() { Timeout = 60_000 });
+            await Assertions.Expect(page).ToHaveURLAsync(ProductDetailsUrl(), new() { Timeout = 60_000 });
         }
         catch (TimeoutException)
         {
@@ -210,9 +211,12 @@ public sealed class CriticalWorkflowTests(ITestOutputHelper output)
             await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Edit product", Level = 1, Exact = true })).ToBeVisibleAsync();
             await Assertions.Expect(page.Locator(".shell")).ToHaveAttributeAsync("data-interactive", "true");
             await page.GetByRole(AriaRole.Button, new() { Name = action.Button, Exact = true }).ClickAsync();
-            await page.WaitForURLAsync("**/products/*/details");
+            await Assertions.Expect(page).ToHaveURLAsync(ProductDetailsUrl(), new() { Timeout = 30_000 });
             await Assertions.Expect(page.Locator(".heading-badges .status-badge").Filter(new() { HasText = action.Status })).ToHaveTextAsync(action.Status);
             Assert.Equal(0, await page.Locator(".error-panel, main [role='alert']").CountAsync());
         }
     }
+
+    [GeneratedRegex("/products/[^/]+/details$")]
+    private static partial Regex ProductDetailsUrl();
 }

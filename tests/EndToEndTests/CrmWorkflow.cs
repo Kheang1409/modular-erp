@@ -1,10 +1,11 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Deque.AxeCore.Playwright;
 using Microsoft.Playwright;
 
 namespace Erp.EndToEndTests;
 
-internal static class CrmWorkflow
+internal static partial class CrmWorkflow
 {
     public static async Task VerifyAsync(IPage page, string baseUrl)
     {
@@ -25,10 +26,11 @@ internal static class CrmWorkflow
         await page.GetByLabel("Title", new() { Exact = true }).FillAsync(title);
         await page.GetByLabel("Expected revenue", new() { Exact = true }).FillAsync("1200");
         await page.GetByRole(AriaRole.Button, new() { Name = "Save lead", Exact = true }).ClickAsync();
-        await page.WaitForURLAsync("**/crm/leads/*/details");
+        await Assertions.Expect(page).ToHaveURLAsync(LeadDetailsUrl(), new() { Timeout = 30_000 });
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = title, Level = 1, Exact = true })).ToBeVisibleAsync();
         var leadId = Guid.Parse(new Uri(page.Url).Segments[^2].Trim('/'));
         var leadPath = $"/crm/leads/{leadId}/details";
+        await ExpectPathAsync(page, leadPath);
         await FollowAsync(page, "Edit");
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Edit lead", Level = 1, Exact = true })).ToBeVisibleAsync();
         title = $"Updated browser lead {suffix}";
@@ -60,13 +62,13 @@ internal static class CrmWorkflow
         opportunityTitle = $"Updated browser opportunity {suffix}";
         await page.GetByLabel("Title", new() { Exact = true }).FillAsync(opportunityTitle);
         await page.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true }).ClickAsync();
-        await page.WaitForURLAsync($"**{opportunityPath}");
+        await ExpectPathAsync(page, opportunityPath);
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = opportunityTitle, Level = 1, Exact = true })).ToBeVisibleAsync();
         await FollowAsync(page, "Manage");
         var move = page.Locator("form").Filter(new() { Has = page.GetByRole(AriaRole.Button, new() { Name = "Move", Exact = true }) });
         await move.GetByRole(AriaRole.Combobox, new() { Name = "Stage", Exact = true }).SelectOptionAsync(wonId.ToString());
         await move.GetByRole(AriaRole.Button, new() { Name = "Move", Exact = true }).ClickAsync();
-        await page.WaitForURLAsync($"**{opportunityPath}");
+        await ExpectPathAsync(page, opportunityPath);
         await Assertions.Expect(page.Locator("main .eyebrow")).ToContainTextAsync($"Won · {wonName}");
         await VerifyArchiveAsync(page, opportunityPath);
 
@@ -100,7 +102,7 @@ internal static class CrmWorkflow
         Assert.NotEmpty(values);
         await users.SelectOptionAsync(values[0]);
         await page.GetByRole(AriaRole.Button, new() { Name = "Save assignment", Exact = true }).ClickAsync();
-        await page.WaitForURLAsync($"**{detailsPath}");
+        await ExpectPathAsync(page, detailsPath);
         await Assertions.Expect(page.Locator(".shell")).ToHaveAttributeAsync("data-interactive", "true");
         Assert.Equal(0, await page.Locator(".error-panel, main [role='alert']").CountAsync());
     }
@@ -110,13 +112,13 @@ internal static class CrmWorkflow
         await FollowAsync(page, "Add activity");
         await page.GetByLabel("Subject", new() { Exact = true }).FillAsync(subject);
         await page.GetByRole(AriaRole.Button, new() { Name = "Add activity", Exact = true }).ClickAsync();
-        await page.WaitForURLAsync($"**{detailsPath}");
+        await ExpectPathAsync(page, detailsPath);
         foreach (var action in new[] { (Button: "Complete", Status: "Completed"), (Button: "Reopen", Status: "Open") })
         {
             var entry = page.Locator("main li").Filter(new() { HasText = subject });
             await FollowAsync(page, entry.GetByRole(AriaRole.Link, new() { Name = "Manage", Exact = true }));
             await page.GetByRole(AriaRole.Button, new() { Name = action.Button, Exact = true }).ClickAsync();
-            await page.WaitForURLAsync($"**{detailsPath}");
+            await ExpectPathAsync(page, detailsPath);
             await Assertions.Expect(page.Locator("main li").Filter(new() { HasText = subject })).ToContainTextAsync(action.Status);
         }
     }
@@ -127,13 +129,16 @@ internal static class CrmWorkflow
         {
             await FollowAsync(page, action.Button);
             await page.GetByRole(AriaRole.Button, new() { Name = action.Button, Exact = true }).ClickAsync();
-            await page.WaitForURLAsync($"**{detailsPath}");
+            await ExpectPathAsync(page, detailsPath);
             await Assertions.Expect(page.Locator("main dl").GetByText(action.Status, new() { Exact = true })).ToBeVisibleAsync();
         }
     }
 
     private static Task FollowAsync(IPage page, string name) =>
         FollowAsync(page, page.GetByRole(AriaRole.Link, new() { Name = name, Exact = true }));
+
+    private static Task ExpectPathAsync(IPage page, string path) =>
+        Assertions.Expect(page).ToHaveURLAsync(new Uri(new Uri(page.Url), path).ToString(), new() { Timeout = 30_000 });
 
     private static async Task FollowAsync(IPage page, ILocator link)
     {
@@ -142,7 +147,7 @@ internal static class CrmWorkflow
         Assert.False(string.IsNullOrWhiteSpace(href));
         var target = new Uri(new Uri(page.Url), href);
         await link.ClickAsync();
-        await page.WaitForURLAsync(target.ToString());
+        await Assertions.Expect(page).ToHaveURLAsync(target.ToString(), new() { Timeout = 30_000 });
         await Assertions.Expect(page.Locator(".shell")).ToHaveAttributeAsync("data-interactive", "true");
     }
 
@@ -171,4 +176,7 @@ internal static class CrmWorkflow
         using var document = JsonDocument.Parse(await response.TextAsync());
         return document.RootElement.Clone();
     }
+
+    [GeneratedRegex("/crm/leads/[^/]+/details$")]
+    private static partial Regex LeadDetailsUrl();
 }

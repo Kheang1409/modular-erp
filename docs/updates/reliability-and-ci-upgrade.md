@@ -125,6 +125,9 @@ The browser checks also follow the drawer's current Open/Close navigation labels
 and cover visible keyboard-focus wrapping, scrim/Escape closure, and focus
 restoration. Navigation waits for each new interactive circuit before the next
 click: rendered server HTML alone does not prove an interactive page is ready.
+URL assertions also check navigation state directly instead of waiting for an
+event that may already have fired. This avoids reporting a timeout after a
+successful save; rendered headings and persisted-state assertions remain in place.
 
 ## What remains before a production release
 

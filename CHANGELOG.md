@@ -8,6 +8,7 @@ All notable changes are documented here. The project follows semantic versioning
 - Added real-PostgreSQL CRM rollback/retry and conversion regressions, shared-session registration/model checks, and browser coverage for CRM configuration and sales-pipeline workflows.
 - Fixed company-user lookup and ordering queries to filter/sort before DTO projection, restoring PostgreSQL-backed CRM assignment without changing tenant/company membership checks.
 - Updated browser regressions for the drawer's dynamic accessible labels, keyboard wrapping, scrim/Escape closure, and focus restoration; navigation checks wait for each new circuit before interacting.
+- Replaced Product/CRM navigation-event waits with URL assertions followed by rendered-state checks, avoiding a missed-event timeout after a successful save without increasing timeouts or relaxing validation.
 - Extended the shared transaction boundary to Products create/edit/archive/reactivate and their audit records, preserving ordinary CSV partial success and existing conflict/concurrency responses without schema changes.
 - Made product-editor initialization sequential for the shared session and added controlled rendered-form, PostgreSQL failure/retry, and browser product lifecycle regressions.
 - Added a shared PostgreSQL transaction coordinator and atomic Contacts business/audit writes, with rollback, nested-scope, cancellation, and retry regressions against real PostgreSQL.
