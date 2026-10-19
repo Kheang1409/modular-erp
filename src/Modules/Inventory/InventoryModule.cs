@@ -2,6 +2,7 @@ using System.Reflection;
 #pragma warning disable CA1725
 using Erp.Abstractions.Events;
 using Erp.Abstractions.Modules;
+using Erp.Abstractions.Persistence;
 using Erp.Modules.Inventory.Contracts;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Routing;
@@ -13,7 +14,14 @@ public sealed class InventoryModule : IErpModule
 {
     public ModuleManifest Manifest { get; } = new("erp.inventory", "Inventory", "0.1.0", "Ledger-derived stock, reservations and warehouse movements.", "ERP Community", "Apache-2.0", "0.1.0", [new("erp.products", ">=0.1.0 <1.0.0"), new("erp.sales", ">=0.1.0 <1.0.0"), new("erp.purchasing", ">=0.1.0 <1.0.0")], [InventoryPermissions.Read, InventoryPermissions.Configure, InventoryPermissions.Manage, InventoryPermissions.Complete, InventoryPermissions.Reserve, InventoryPermissions.Adjust]);
     public Assembly ComponentAssembly => typeof(InventoryModule).Assembly;
-    public void ConfigureServices(IServiceCollection s, IConfiguration c) { var cs = c.GetConnectionString("Postgres") ?? throw new InvalidOperationException("ConnectionStrings:Postgres is required."); s.AddDbContext<InventoryDbContext>(o => o.UseNpgsql(cs, p => p.MigrationsHistoryTable("__EFMigrationsHistory", "inventory"))); s.AddScoped<IInventoryService, InventoryService>(); s.AddScoped<IStockAvailability, StockAvailability>(); s.AddScoped<IInventoryReportingData, InventoryReportingData>(); s.AddScoped<IModuleDatabaseInitializer, InventoryDatabaseInitializer>(); }
+    public void ConfigureServices(IServiceCollection s, IConfiguration c)
+    {
+        s.AddDbContext<InventoryDbContext>((provider, options) => options.UseNpgsql(
+            provider.GetRequiredService<IRelationalDatabaseSession>().Connection,
+            postgres => postgres.MigrationsHistoryTable("__EFMigrationsHistory", "inventory")));
+        s.AddScoped<IInventoryService, InventoryService>(); s.AddScoped<IStockAvailability, StockAvailability>();
+        s.AddScoped<IInventoryReportingData, InventoryReportingData>(); s.AddScoped<IModuleDatabaseInitializer, InventoryDatabaseInitializer>();
+    }
     public void ConfigureEndpoints(IEndpointRouteBuilder e) => e.MapInventoryEndpoints();
     public void ConfigurePermissions(IPermissionRegistry p) { p.Add(new(InventoryPermissions.Read, "View inventory", Manifest.Id)); p.Add(new(InventoryPermissions.Configure, "Configure warehouses", Manifest.Id)); p.Add(new(InventoryPermissions.Manage, "Manage stock moves", Manifest.Id)); p.Add(new(InventoryPermissions.Complete, "Complete stock moves", Manifest.Id)); p.Add(new(InventoryPermissions.Reserve, "Reserve stock", Manifest.Id)); p.Add(new(InventoryPermissions.Adjust, "Adjust stock", Manifest.Id)); }
     public void ConfigureNavigation(INavigationRegistry n) { n.Add(new("Movements", "/inventory/moves", "Inventory", 80, InventoryPermissions.Read)); n.Add(new("Balances", "/inventory/balances", "Inventory", 81, InventoryPermissions.Read)); n.Add(new("Reservations", "/inventory/reservations", "Inventory", 82, InventoryPermissions.Read)); }

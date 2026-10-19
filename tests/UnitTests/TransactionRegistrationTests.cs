@@ -4,6 +4,7 @@ using Erp.Infrastructure.Persistence;
 using Erp.ModuleSystem;
 using Erp.Modules.Contacts;
 using Erp.Modules.Crm;
+using Erp.Modules.Inventory;
 using Erp.Modules.Products;
 using Erp.Modules.Purchasing;
 using Erp.Modules.Sales;
@@ -16,7 +17,7 @@ namespace Erp.UnitTests;
 public sealed class TransactionRegistrationTests
 {
     [Fact]
-    public async Task RuntimeRegistrationSharesOneConnectionPerScopeAcrossPlatformContactsProductsCrmSalesAndPurchasing()
+    public async Task RuntimeRegistrationSharesOneConnectionPerScopeAcrossPlatformContactsProductsCrmSalesPurchasingAndInventory()
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
@@ -29,6 +30,7 @@ public sealed class TransactionRegistrationTests
         new CrmModule().ConfigureServices(services, configuration);
         new SalesModule().ConfigureServices(services, configuration);
         new PurchasingModule().ConfigureServices(services, configuration);
+        new InventoryModule().ConfigureServices(services, configuration);
         services.AddErpInfrastructure(configuration, new PermissionRegistry());
         await using var provider = services.BuildServiceProvider();
         await using var first = provider.CreateAsyncScope();
@@ -40,6 +42,7 @@ public sealed class TransactionRegistrationTests
         var crm = first.ServiceProvider.GetRequiredService<CrmDbContext>();
         var sales = first.ServiceProvider.GetRequiredService<SalesDbContext>();
         var purchasing = first.ServiceProvider.GetRequiredService<PurchasingDbContext>();
+        var inventory = first.ServiceProvider.GetRequiredService<InventoryDbContext>();
 
         Assert.Same(session.Connection, platform.Database.GetDbConnection());
         Assert.Same(session.Connection, contacts.Database.GetDbConnection());
@@ -47,6 +50,9 @@ public sealed class TransactionRegistrationTests
         Assert.Same(session.Connection, crm.Database.GetDbConnection());
         Assert.Same(session.Connection, sales.Database.GetDbConnection());
         Assert.Same(session.Connection, purchasing.Database.GetDbConnection());
+        Assert.Same(session.Connection, inventory.Database.GetDbConnection());
+        Assert.IsAssignableFrom<ITransactionParticipant>(inventory);
+        Assert.Same(inventory, first.ServiceProvider.GetRequiredService<InventoryDbContext>());
         Assert.IsAssignableFrom<ITransactionParticipant>(purchasing);
         Assert.Same(purchasing, first.ServiceProvider.GetRequiredService<PurchasingDbContext>());
         Assert.IsAssignableFrom<ITransactionParticipant>(sales);
@@ -72,6 +78,9 @@ public sealed class TransactionRegistrationTests
         var nextPurchasing = second.ServiceProvider.GetRequiredService<PurchasingDbContext>();
         Assert.Same(nextSession.Connection, nextPurchasing.Database.GetDbConnection());
         Assert.NotSame(purchasing, nextPurchasing);
+        var nextInventory = second.ServiceProvider.GetRequiredService<InventoryDbContext>();
+        Assert.Same(nextSession.Connection, nextInventory.Database.GetDbConnection());
+        Assert.NotSame(inventory, nextInventory);
         Assert.NotSame(coordinator, second.ServiceProvider.GetRequiredService<IBusinessTransactionCoordinator>());
     }
 
@@ -85,6 +94,7 @@ public sealed class TransactionRegistrationTests
         new CrmModule().ConfigureServices(services, configuration);
         new SalesModule().ConfigureServices(services, configuration);
         new PurchasingModule().ConfigureServices(services, configuration);
+        new InventoryModule().ConfigureServices(services, configuration);
 
         var exception = Assert.Throws<InvalidOperationException>(() =>
             services.AddErpInfrastructure(configuration, new PermissionRegistry()));
@@ -103,6 +113,7 @@ public sealed class TransactionRegistrationTests
         new CrmModule().ConfigureServices(services, configuration);
         new SalesModule().ConfigureServices(services, configuration);
         new PurchasingModule().ConfigureServices(services, configuration);
+        new InventoryModule().ConfigureServices(services, configuration);
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
 
@@ -111,11 +122,13 @@ public sealed class TransactionRegistrationTests
         var crm = Assert.Throws<InvalidOperationException>(() => scope.ServiceProvider.GetRequiredService<CrmDbContext>());
         var sales = Assert.Throws<InvalidOperationException>(() => scope.ServiceProvider.GetRequiredService<SalesDbContext>());
         var purchasing = Assert.Throws<InvalidOperationException>(() => scope.ServiceProvider.GetRequiredService<PurchasingDbContext>());
+        var inventory = Assert.Throws<InvalidOperationException>(() => scope.ServiceProvider.GetRequiredService<InventoryDbContext>());
 
         Assert.Contains(nameof(IRelationalDatabaseSession), contacts.Message);
         Assert.Contains(nameof(IRelationalDatabaseSession), products.Message);
         Assert.Contains(nameof(IRelationalDatabaseSession), crm.Message);
         Assert.Contains(nameof(IRelationalDatabaseSession), sales.Message);
         Assert.Contains(nameof(IRelationalDatabaseSession), purchasing.Message);
+        Assert.Contains(nameof(IRelationalDatabaseSession), inventory.Message);
     }
 }

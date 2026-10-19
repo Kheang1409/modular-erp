@@ -3,6 +3,7 @@ using System.Text.Json;
 using Erp.Abstractions.Auditing;
 using Erp.Abstractions.Context;
 using Erp.Abstractions.Events;
+using Erp.Abstractions.Persistence;
 using Erp.Abstractions.Sequences;
 using Erp.Modules.Products.Contracts;
 using Erp.Modules.Purchasing.Contracts;
@@ -19,44 +20,106 @@ public interface IInventoryService
     Task<StockBalanceDto> BalanceAsync(Guid productId, Guid locationId, CancellationToken t); Task<StockBalancePage> BalancesAsync(StockBalanceQuery q, CancellationToken t); Task<ReservationPage> ReservationsAsync(ReservationQuery q, CancellationToken t); Task<ReservationDto?> ReservationAsync(Guid id, CancellationToken t); Task<ReservationDto> ReserveAsync(ReserveStockRequest r, CancellationToken t); Task<ReservationDto> ReleaseAsync(Guid id, ReservationActionRequest r, CancellationToken t);
 }
 
-public sealed class InventoryService(InventoryDbContext db, ITenantContext tenant, ICompanyContext company, IProductDirectory products, ISalesOrderDirectory sales, IPurchaseOrderDirectory purchasing, ISequenceService sequences, IClock clock, IAuditLogWriter audit, IOutboxWriter outbox, IHttpContextAccessor http) : IInventoryService
+public sealed class InventoryService(InventoryDbContext db, ITenantContext tenant, ICompanyContext company,
+    IProductDirectory products, ISalesOrderDirectory sales, IPurchaseOrderDirectory purchasing, ISequenceService sequences,
+    IClock clock, IAuditLogWriter audit, IOutboxWriter outbox, IHttpContextAccessor http,
+    IBusinessTransactionCoordinator transactions) : IInventoryService
 {
     public async Task<IReadOnlyList<WarehouseDto>> WarehousesAsync(CancellationToken t) => (await db.Warehouses.AsNoTracking().OrderBy(x => x.Code).ToListAsync(t)).Select(WarehouseDtoOf).ToList();
-    public async Task<WarehouseDto> SaveWarehouseAsync(Guid? id, WarehouseRequest r, CancellationToken t) { ValidateText(r.Code, r.Name, r.ConcurrencyStamp, id.HasValue); Warehouse x; if (id is null) { x = new() { Id = Guid.NewGuid(), TenantId = Tenant(), CompanyId = Company(), Code = r.Code!.Trim().ToUpperInvariant(), Name = r.Name!.Trim(), IsActive = r.IsActive, ConcurrencyStamp = Stamp() }; db.Add(x); } else { x = await db.Warehouses.SingleOrDefaultAsync(v => v.Id == id, t) ?? throw new KeyNotFoundException(); Check(x.ConcurrencyStamp, r.ConcurrencyStamp!); if (x.IsActive && !r.IsActive && await db.Locations.AnyAsync(v => v.WarehouseId == x.Id && v.IsActive, t)) throw Error("isActive", "Deactivate all warehouse locations first."); x.Code = r.Code!.Trim().ToUpperInvariant(); x.Name = r.Name!.Trim(); x.IsActive = r.IsActive; x.ConcurrencyStamp = Stamp(); } await Save(t); await Audit("inventory.warehouse.saved", x.Id, WarehouseDtoOf(x), t); return WarehouseDtoOf(x); }
+    public async Task<WarehouseDto> SaveWarehouseAsync(Guid? id, WarehouseRequest r, CancellationToken t)
+    {
+        ValidateText(r.Code, r.Name, r.ConcurrencyStamp, id.HasValue);
+        await using var transaction = await transactions.BeginAsync(db, t);
+        Warehouse x; if (id is null) { x = new() { Id = Guid.NewGuid(), TenantId = Tenant(), CompanyId = Company(), Code = r.Code!.Trim().ToUpperInvariant(), Name = r.Name!.Trim(), IsActive = r.IsActive, ConcurrencyStamp = Stamp() }; db.Add(x); } else { x = await db.Warehouses.SingleOrDefaultAsync(v => v.Id == id, t) ?? throw new KeyNotFoundException(); Check(x.ConcurrencyStamp, r.ConcurrencyStamp!); if (x.IsActive && !r.IsActive && await db.Locations.AnyAsync(v => v.WarehouseId == x.Id && v.IsActive, t)) throw Error("isActive", "Deactivate all warehouse locations first."); x.Code = r.Code!.Trim().ToUpperInvariant(); x.Name = r.Name!.Trim(); x.IsActive = r.IsActive; x.ConcurrencyStamp = Stamp(); }
+        await Save(t); await Audit("inventory.warehouse.saved", x.Id, WarehouseDtoOf(x), t);
+        var result = WarehouseDtoOf(x);
+        await transaction.CommitAsync(t);
+        return result;
+    }
     public async Task<IReadOnlyList<LocationDto>> LocationsAsync(CancellationToken t) => (await db.Locations.AsNoTracking().OrderBy(x => x.Code).ToListAsync(t)).Select(LocationDtoOf).ToList();
-    public async Task<LocationDto> SaveLocationAsync(Guid? id, LocationRequest r, CancellationToken t) { ValidateText(r.Code, r.Name, r.ConcurrencyStamp, id.HasValue); if (r.Type == LocationType.Internal && r.WarehouseId is null) throw Error("warehouseId", "Internal locations require a warehouse."); if (r.WarehouseId is not null && !await db.Warehouses.AnyAsync(x => x.Id == r.WarehouseId && (!r.IsActive || x.IsActive), t)) throw Error("warehouseId", "An active warehouse in the current company is required."); StockLocation x; if (id is null) { x = new() { Id = Guid.NewGuid(), TenantId = Tenant(), CompanyId = Company(), WarehouseId = r.WarehouseId, Code = r.Code!.Trim().ToUpperInvariant(), Name = r.Name!.Trim(), Type = r.Type, IsActive = r.IsActive, ConcurrencyStamp = Stamp() }; db.Add(x); } else { x = await db.Locations.SingleOrDefaultAsync(v => v.Id == id, t) ?? throw new KeyNotFoundException(); Check(x.ConcurrencyStamp, r.ConcurrencyStamp!); if (x.IsActive && !r.IsActive) { var hasReservations = await db.Reservations.AnyAsync(v => v.LocationId == x.Id && v.State == ReservationState.Active, t); var hasDraftMoves = await db.StockMoves.AnyAsync(v => v.State == StockMoveState.Draft && (v.SourceLocationId == x.Id || v.DestinationLocationId == x.Id), t); if (hasReservations || hasDraftMoves) throw Error("isActive", "Release active reservations and complete or cancel draft movements before deactivating this location."); } x.WarehouseId = r.WarehouseId; x.Code = r.Code!.Trim().ToUpperInvariant(); x.Name = r.Name!.Trim(); x.Type = r.Type; x.IsActive = r.IsActive; x.ConcurrencyStamp = Stamp(); } await Save(t); await Audit("inventory.location.saved", x.Id, LocationDtoOf(x), t); return LocationDtoOf(x); }
+    public async Task<LocationDto> SaveLocationAsync(Guid? id, LocationRequest r, CancellationToken t)
+    {
+        ValidateText(r.Code, r.Name, r.ConcurrencyStamp, id.HasValue); if (r.Type == LocationType.Internal && r.WarehouseId is null) throw Error("warehouseId", "Internal locations require a warehouse.");
+        await using var transaction = await transactions.BeginAsync(db, t);
+        if (r.WarehouseId is not null && !await db.Warehouses.AnyAsync(x => x.Id == r.WarehouseId && (!r.IsActive || x.IsActive), t)) throw Error("warehouseId", "An active warehouse in the current company is required.");
+        StockLocation x; if (id is null) { x = new() { Id = Guid.NewGuid(), TenantId = Tenant(), CompanyId = Company(), WarehouseId = r.WarehouseId, Code = r.Code!.Trim().ToUpperInvariant(), Name = r.Name!.Trim(), Type = r.Type, IsActive = r.IsActive, ConcurrencyStamp = Stamp() }; db.Add(x); } else { x = await db.Locations.SingleOrDefaultAsync(v => v.Id == id, t) ?? throw new KeyNotFoundException(); Check(x.ConcurrencyStamp, r.ConcurrencyStamp!); if (x.IsActive && !r.IsActive) { var hasReservations = await db.Reservations.AnyAsync(v => v.LocationId == x.Id && v.State == ReservationState.Active, t); var hasDraftMoves = await db.StockMoves.AnyAsync(v => v.State == StockMoveState.Draft && (v.SourceLocationId == x.Id || v.DestinationLocationId == x.Id), t); if (hasReservations || hasDraftMoves) throw Error("isActive", "Release active reservations and complete or cancel draft movements before deactivating this location."); } x.WarehouseId = r.WarehouseId; x.Code = r.Code!.Trim().ToUpperInvariant(); x.Name = r.Name!.Trim(); x.Type = r.Type; x.IsActive = r.IsActive; x.ConcurrencyStamp = Stamp(); }
+        await Save(t); await Audit("inventory.location.saved", x.Id, LocationDtoOf(x), t);
+        var result = LocationDtoOf(x);
+        await transaction.CommitAsync(t);
+        return result;
+    }
     public async Task<StockMovePage> SearchAsync(StockMoveQuery q, CancellationToken t) { if (q.Page < 1 || q.PageSize is < 1 or > 100) throw Error("page", "Invalid paging parameters."); if (q.FromDate is DateOnly from && q.ToDate is DateOnly to && from > to) throw Error("date", "From date must not be after to date."); var s = db.StockMoves.AsNoTracking().AsQueryable(); var search = Clean(q.Search); if (search is not null) { var pattern = $"%{search}%"; s = s.Where(x => EF.Functions.ILike(x.Number, pattern) || EF.Functions.ILike(x.ProductSku, pattern) || x.Notes != null && EF.Functions.ILike(x.Notes, pattern)); } if (q.ProductId is not null) s = s.Where(x => x.ProductId == q.ProductId); if (q.WarehouseId is Guid warehouse) { var locations = db.Locations.Where(x => x.WarehouseId == warehouse).Select(x => x.Id); s = s.Where(x => x.SourceLocationId != null && locations.Contains(x.SourceLocationId.Value) || x.DestinationLocationId != null && locations.Contains(x.DestinationLocationId.Value)); } if (q.LocationId is not null) s = s.Where(x => x.SourceLocationId == q.LocationId || x.DestinationLocationId == q.LocationId); if (q.Type is not null) s = s.Where(x => x.Type == q.Type); if (q.State is not null) s = s.Where(x => x.State == q.State); if (q.FromDate is DateOnly minimum) s = s.Where(x => x.BusinessDate >= minimum); if (q.ToDate is DateOnly maximum) s = s.Where(x => x.BusinessDate <= maximum); if (!string.IsNullOrWhiteSpace(q.ReferenceDocumentType)) s = s.Where(x => x.ReferenceDocumentType == CanonicalDocumentType(q.ReferenceDocumentType)); if (q.ReferenceDocumentId is not null) s = s.Where(x => x.ReferenceDocumentId == q.ReferenceDocumentId); s = (q.Sort.ToLowerInvariant(), q.Descending) switch { ("number", false) => s.OrderBy(x => x.Number), ("number", true) => s.OrderByDescending(x => x.Number), ("date", false) => s.OrderBy(x => x.BusinessDate).ThenBy(x => x.Number), ("date", true) => s.OrderByDescending(x => x.BusinessDate).ThenByDescending(x => x.Number), ("sku", false) => s.OrderBy(x => x.ProductSku).ThenBy(x => x.Number), ("sku", true) => s.OrderByDescending(x => x.ProductSku).ThenByDescending(x => x.Number), ("created", false) => s.OrderBy(x => x.CreatedAtUtc), ("created", true) => s.OrderByDescending(x => x.CreatedAtUtc), _ => throw Error("sort", "Sort must be created, number, date, or sku.") }; var count = await s.CountAsync(t); var rows = await s.Skip((q.Page - 1) * q.PageSize).Take(q.PageSize).ToListAsync(t); return new(q.Page, q.PageSize, count, rows.Select(MoveDto).ToList()); }
     public async Task<StockMoveDto?> GetAsync(Guid id, CancellationToken t) => (await db.StockMoves.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, t)) is { } x ? MoveDto(x) : null;
-    public async Task<StockMoveDto> CreateAsync(StockMoveRequest r, CancellationToken t) { await ValidateMove(r, t); var x = await NewMove(r, t); db.Add(x); await Save(t); await Audit("inventory.move.created", x.Id, MoveDto(x), t); return MoveDto(x); }
+    public async Task<StockMoveDto> CreateAsync(StockMoveRequest r, CancellationToken t)
+    {
+        await using var transaction = await transactions.BeginAsync(db, t);
+        await ValidateMove(r, t); var x = await NewMove(r, t); db.Add(x); await Save(t); await Audit("inventory.move.created", x.Id, MoveDto(x), t);
+        var result = MoveDto(x);
+        await transaction.CommitAsync(t);
+        return result;
+    }
     public async Task<StockMoveBatchDto> CreateBatchAsync(StockMoveBatchRequest r, CancellationToken t)
     {
         if (r.Lines is not { Count: > 0 and <= 100 }) throw Error("lines", "A batch requires between 1 and 100 movement lines.");
         if (r.Lines.Select(x => x.ProductId).Distinct().Count() != r.Lines.Count) throw Error("lines", "Each product may appear only once in a movement batch.");
         var requests = r.Lines.Select(x => new StockMoveRequest(r.Type, x.ProductId, x.Quantity, r.SourceLocationId, r.DestinationLocationId, r.BusinessDate, r.ReferenceDocumentType, r.ReferenceDocumentId, r.Notes)).ToList();
+        await using var transaction = await transactions.BeginAsync(db, t);
         foreach (var request in requests) await ValidateMove(request, t);
-        await using var tx = await db.Database.BeginTransactionAsync(t);
         var moves = new List<StockMove>(requests.Count);
         foreach (var request in requests) { var move = await NewMove(request, t); moves.Add(move); db.Add(move); }
         await Save(t);
         foreach (var move in moves) await Audit("inventory.move.created", move.Id, MoveDto(move), t);
-        await tx.CommitAsync(t);
-        return new(moves.Select(MoveDto).ToList());
+        var result = new StockMoveBatchDto(moves.Select(MoveDto).ToList());
+        await transaction.CommitAsync(t);
+        return result;
     }
-    public async Task<StockMoveDto> CancelAsync(Guid id, string stamp, CancellationToken t) { var x = await FindMove(id, t); Check(x.ConcurrencyStamp, stamp); if (x.State != StockMoveState.Draft) throw Error("state", "Only draft moves can be cancelled."); x.State = StockMoveState.Cancelled; x.ConcurrencyStamp = Stamp(); await Save(t); await Audit("inventory.move.cancelled", x.Id, MoveDto(x), t); return MoveDto(x); }
-    public async Task<StockMoveDto> CompleteAsync(Guid id, CompleteMoveRequest r, CancellationToken t) { if (string.IsNullOrWhiteSpace(r.IdempotencyKey) || r.IdempotencyKey.Length > 100) throw Error("idempotencyKey", "An idempotency key up to 100 characters is required."); var existing = await db.StockMoves.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, t) ?? throw new KeyNotFoundException(); if (existing.State == StockMoveState.Completed && existing.CompletionKey == r.IdempotencyKey) return MoveDto(existing); Check(existing.ConcurrencyStamp, r.ConcurrencyStamp); if (existing.State != StockMoveState.Draft) throw Error("state", "Only draft moves can be completed."); await using var tx = await db.Database.BeginTransactionAsync(t); var x = await db.StockMoves.SingleAsync(v => v.Id == id, t); var sourceType = await ValidateStoredMoveLocations(x, t); FulfillmentProgress? progress = null; if (x.ReferenceDocumentId is Guid documentId && x.ReferenceDocumentType is "PurchaseOrder" or "SalesOrder") { await LockDocument(x.ReferenceDocumentType, documentId, x.ProductId, t); progress = await ValidateFulfillment(x, documentId, t); } if (x.SourceLocationId is Guid source && sourceType == LocationType.Internal) { await Lock(x.ProductId, source, t); if (x.Type == StockMoveType.Delivery && x.ReferenceDocumentId is Guid orderId && x.ReferenceDocumentType == "SalesOrder") await ConsumeReservations(x, orderId, source, t); else { var balance = await BalanceAsync(x.ProductId, source, t); if (balance.Available < x.Quantity) throw Error("quantity", "Insufficient available stock."); } } x.State = StockMoveState.Completed; x.CompletionKey = r.IdempotencyKey.Trim(); x.CompletedAtUtc = clock.UtcNow; x.CompletedBy = User(); x.ConcurrencyStamp = Stamp(); await Save(t); AddEvent(x, progress, sourceType); await Audit("inventory.move.completed", x.Id, MoveDto(x), t); await tx.CommitAsync(t); return MoveDto(x); }
+    public async Task<StockMoveDto> CancelAsync(Guid id, string stamp, CancellationToken t)
+    {
+        await using var transaction = await transactions.BeginAsync(db, t);
+        var x = await FindMove(id, t); Check(x.ConcurrencyStamp, stamp); if (x.State != StockMoveState.Draft) throw Error("state", "Only draft moves can be cancelled."); x.State = StockMoveState.Cancelled; x.ConcurrencyStamp = Stamp(); await Save(t); await Audit("inventory.move.cancelled", x.Id, MoveDto(x), t);
+        var result = MoveDto(x);
+        await transaction.CommitAsync(t);
+        return result;
+    }
+    public async Task<StockMoveDto> CompleteAsync(Guid id, CompleteMoveRequest r, CancellationToken t)
+    {
+        if (string.IsNullOrWhiteSpace(r.IdempotencyKey) || r.IdempotencyKey.Length > 100) throw Error("idempotencyKey", "An idempotency key up to 100 characters is required.");
+        await using var transaction = await transactions.BeginAsync(db, t);
+        var existing = await db.StockMoves.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, t) ?? throw new KeyNotFoundException();
+        if (existing.State == StockMoveState.Completed && existing.CompletionKey == r.IdempotencyKey.Trim())
+        {
+            var replay = MoveDto(existing);
+            await transaction.CommitAsync(t);
+            return replay;
+        }
+        Check(existing.ConcurrencyStamp, r.ConcurrencyStamp); if (existing.State != StockMoveState.Draft) throw Error("state", "Only draft moves can be completed.");
+        var x = await db.StockMoves.SingleAsync(v => v.Id == id, t); var sourceType = await ValidateStoredMoveLocations(x, t); FulfillmentProgress? progress = null;
+        if (x.ReferenceDocumentId is Guid documentId && x.ReferenceDocumentType is "PurchaseOrder" or "SalesOrder") { await LockDocument(x.ReferenceDocumentType, documentId, x.ProductId, t); progress = await ValidateFulfillment(x, documentId, t); }
+        if (x.SourceLocationId is Guid source && sourceType == LocationType.Internal) { await Lock(x.ProductId, source, t); if (x.Type == StockMoveType.Delivery && x.ReferenceDocumentId is Guid orderId && x.ReferenceDocumentType == "SalesOrder") await ConsumeReservations(x, orderId, source, t); else { var balance = await BalanceAsync(x.ProductId, source, t); if (balance.Available < x.Quantity) throw Error("quantity", "Insufficient available stock."); } }
+        x.State = StockMoveState.Completed; x.CompletionKey = r.IdempotencyKey.Trim(); x.CompletedAtUtc = clock.UtcNow; x.CompletedBy = User(); x.ConcurrencyStamp = Stamp(); await Save(t); AddEvent(x, progress, sourceType); await Audit("inventory.move.completed", x.Id, MoveDto(x), t);
+        var result = MoveDto(x);
+        await transaction.CommitAsync(t);
+        return result;
+    }
     public async Task<StockMoveDto> CorrectAsync(Guid id, CancellationToken t)
     {
-        await using var tx = await db.Database.BeginTransactionAsync(t);
+        await using var transaction = await transactions.BeginAsync(db, t);
         await LockCorrection(id, t);
-        if (await db.StockMoves.AsNoTracking().SingleOrDefaultAsync(x => x.ReversesMoveId == id, t) is { } prior) { await tx.CommitAsync(t); return MoveDto(prior); }
+        if (await db.StockMoves.AsNoTracking().SingleOrDefaultAsync(x => x.ReversesMoveId == id, t) is { } prior)
+        {
+            var replay = MoveDto(prior);
+            await transaction.CommitAsync(t);
+            return replay;
+        }
         var original = await db.StockMoves.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, t) ?? throw new KeyNotFoundException();
         if (original.State != StockMoveState.Completed) throw Error("state", "Only completed moves can be corrected.");
         var reverse = new StockMove { Id = Guid.NewGuid(), TenantId = Tenant(), CompanyId = Company(), Number = await sequences.NextAsync(new("inventory.move", "MOVE-{yyyy}-", 7, DateOnly.FromDateTime(clock.UtcNow.UtcDateTime)), t), Type = ReverseType(original), State = StockMoveState.Draft, ProductId = original.ProductId, ProductSku = original.ProductSku, UnitCode = original.UnitCode, Quantity = original.Quantity, SourceLocationId = original.DestinationLocationId, DestinationLocationId = original.SourceLocationId, ReferenceDocumentType = "StockMove", ReferenceDocumentId = original.Id, BusinessDate = DateOnly.FromDateTime(clock.UtcNow.UtcDateTime), Notes = $"Compensating reversal of {original.Number}", ReversesMoveId = original.Id, CreatedAtUtc = clock.UtcNow, CreatedBy = User(), ConcurrencyStamp = Stamp() };
         db.StockMoves.Add(reverse);
         await Save(t);
         await Audit("inventory.move.correction_created", reverse.Id, MoveDto(reverse), t);
-        await tx.CommitAsync(t);
-        return MoveDto(reverse);
+        var result = MoveDto(reverse);
+        await transaction.CommitAsync(t);
+        return result;
     }
     public async Task<StockBalanceDto> BalanceAsync(Guid productId, Guid locationId, CancellationToken t) { var inbound = await db.StockMoves.Where(x => x.ProductId == productId && x.DestinationLocationId == locationId && x.State == StockMoveState.Completed).SumAsync(x => (decimal?)x.Quantity, t) ?? 0; var outbound = await db.StockMoves.Where(x => x.ProductId == productId && x.SourceLocationId == locationId && x.State == StockMoveState.Completed).SumAsync(x => (decimal?)x.Quantity, t) ?? 0; var reserved = await db.Reservations.Where(x => x.ProductId == productId && x.LocationId == locationId && x.State == ReservationState.Active).SumAsync(x => (decimal?)(x.Quantity - x.ConsumedQuantity), t) ?? 0; var onHand = inbound - outbound; return new(productId, locationId, onHand, reserved, onHand - reserved); }
     public async Task<StockBalancePage> BalancesAsync(StockBalanceQuery q, CancellationToken t)
@@ -89,6 +152,7 @@ public sealed class InventoryService(InventoryDbContext db, ITenantContext tenan
     {
         if (r.Quantity <= 0) throw Error("quantity", "Quantity must be greater than zero.");
         ValidateKey(r.IdempotencyKey);
+        await using var transaction = await transactions.BeginAsync(db, t);
         await Product(r.ProductId, t);
         await InternalLocation(r.LocationId, t);
         if (!string.Equals(r.ReferenceDocumentType, "SalesOrder", StringComparison.OrdinalIgnoreCase) || r.ReferenceDocumentId is not Guid orderId) throw Error("referenceDocumentId", "Reservations must reference a confirmed sales order.");
@@ -96,13 +160,13 @@ public sealed class InventoryService(InventoryDbContext db, ITenantContext tenan
         if (order is null || order.State is not ("Confirmed" or "PartiallyFulfilled")) throw Error("referenceDocumentId", "A confirmed sales order is required.");
         ValidateDocumentLine(order.Lines.Select(x => (x.ProductId, x.UnitCode, x.Quantity)), r.ProductId, r.Quantity);
         var key = r.IdempotencyKey.Trim();
-        await using var tx = await db.Database.BeginTransactionAsync(t);
         await LockReservationKey(key, t);
         if (await db.Reservations.AsNoTracking().SingleOrDefaultAsync(x => x.IdempotencyKey == key, t) is { } prior)
         {
             if (prior.ProductId != r.ProductId || prior.LocationId != r.LocationId || prior.Quantity != r.Quantity || prior.ReferenceDocumentType != "SalesOrder" || prior.ReferenceDocumentId != orderId) throw Error("idempotencyKey", "The idempotency key has already been used for a different reservation request.");
-            await tx.CommitAsync(t);
-            return ReservationDtoOf(prior);
+            var replay = ReservationDtoOf(prior);
+            await transaction.CommitAsync(t);
+            return replay;
         }
         await LockDocument("SalesOrder", orderId, r.ProductId, t);
         await Lock(r.ProductId, r.LocationId, t);
@@ -117,10 +181,37 @@ public sealed class InventoryService(InventoryDbContext db, ITenantContext tenan
         await Save(t);
         outbox.Add(new StockReservedEvent(Guid.NewGuid(), clock.UtcNow, x.Id, x.ProductId, x.LocationId, x.Quantity));
         await Audit("inventory.stock.reserved", x.Id, ReservationDtoOf(x), t);
-        await tx.CommitAsync(t);
-        return ReservationDtoOf(x);
+        var result = ReservationDtoOf(x);
+        await transaction.CommitAsync(t);
+        return result;
     }
-    public async Task<ReservationDto> ReleaseAsync(Guid id, ReservationActionRequest r, CancellationToken t) { ValidateKey(r.IdempotencyKey); var existing = await db.Reservations.AsNoTracking().SingleOrDefaultAsync(v => v.Id == id, t) ?? throw new KeyNotFoundException(); if (existing.State == ReservationState.Released && existing.ReleaseKey == r.IdempotencyKey.Trim()) return ReservationDtoOf(existing); Check(existing.ConcurrencyStamp, r.ConcurrencyStamp); if (existing.State != ReservationState.Active) throw Error("state", "Only active reservations can be released."); await using var tx = await db.Database.BeginTransactionAsync(t); await Lock(existing.ProductId, existing.LocationId, t); var x = await db.Reservations.SingleAsync(v => v.Id == id, t); x.State = ReservationState.Released; x.ReleaseKey = r.IdempotencyKey.Trim(); x.ReleasedAtUtc = clock.UtcNow; x.ConcurrencyStamp = Stamp(); await Save(t); outbox.Add(new StockReservationReleasedEvent(Guid.NewGuid(), clock.UtcNow, x.Id, x.Quantity - x.ConsumedQuantity)); await Audit("inventory.stock.released", x.Id, ReservationDtoOf(x), t); await tx.CommitAsync(t); return ReservationDtoOf(x); }
+    public async Task<ReservationDto> ReleaseAsync(Guid id, ReservationActionRequest r, CancellationToken t)
+    {
+        ValidateKey(r.IdempotencyKey);
+        await using var transaction = await transactions.BeginAsync(db, t);
+        var existing = await db.Reservations.AsNoTracking().SingleOrDefaultAsync(v => v.Id == id, t) ?? throw new KeyNotFoundException();
+        if (existing.State == ReservationState.Released && existing.ReleaseKey == r.IdempotencyKey.Trim())
+        {
+            var replay = ReservationDtoOf(existing);
+            await transaction.CommitAsync(t);
+            return replay;
+        }
+        Check(existing.ConcurrencyStamp, r.ConcurrencyStamp); if (existing.State != ReservationState.Active) throw Error("state", "Only active reservations can be released.");
+        await Lock(existing.ProductId, existing.LocationId, t);
+        var x = await db.Reservations.SingleAsync(v => v.Id == id, t);
+        await db.Entry(x).ReloadAsync(t);
+        if (x.State == ReservationState.Released && x.ReleaseKey == r.IdempotencyKey.Trim())
+        {
+            var replay = ReservationDtoOf(x);
+            await transaction.CommitAsync(t);
+            return replay;
+        }
+        Check(x.ConcurrencyStamp, r.ConcurrencyStamp); if (x.State != ReservationState.Active) throw Error("state", "Only active reservations can be released.");
+        x.State = ReservationState.Released; x.ReleaseKey = r.IdempotencyKey.Trim(); x.ReleasedAtUtc = clock.UtcNow; x.ConcurrencyStamp = Stamp(); await Save(t); outbox.Add(new StockReservationReleasedEvent(Guid.NewGuid(), clock.UtcNow, x.Id, x.Quantity - x.ConsumedQuantity)); await Audit("inventory.stock.released", x.Id, ReservationDtoOf(x), t);
+        var result = ReservationDtoOf(x);
+        await transaction.CommitAsync(t);
+        return result;
+    }
     private async Task ValidateMove(StockMoveRequest r, CancellationToken t) { if (r.Quantity <= 0) throw Error("quantity", "Quantity must be greater than zero."); if (r.BusinessDate == default) throw Error("businessDate", "Business date is required."); if (r.ReversesMoveId is not null) throw Error("reversesMoveId", "Corrections must be created through the correction endpoint."); await Product(r.ProductId, t); var sourceType = await LocationTypeOf(r.SourceLocationId, t); var destinationType = await LocationTypeOf(r.DestinationLocationId, t); ValidateLocationMatrix(r.Type, sourceType, destinationType); if (r.ReferenceDocumentId is Guid doc && string.Equals(r.ReferenceDocumentType, "PurchaseOrder", StringComparison.OrdinalIgnoreCase)) { if (r.Type != StockMoveType.Receipt) throw Error("type", "Purchase orders can only be fulfilled by receipts."); if (sourceType != LocationType.Supplier) throw Error("sourceLocationId", "Purchase-order receipts must originate at a supplier location."); var po = await purchasing.FindAsync(doc, t); if (po is null || po.State is not ("Confirmed" or "PartiallyReceived")) throw Error("referenceDocumentId", "A confirmed purchase order is required."); ValidateDocumentLine(po.Lines.Select(x => (x.ProductId, x.UnitCode, x.Quantity)), r.ProductId, r.Quantity); } if (r.ReferenceDocumentId is Guid so && string.Equals(r.ReferenceDocumentType, "SalesOrder", StringComparison.OrdinalIgnoreCase)) { if (r.Type != StockMoveType.Delivery) throw Error("type", "Sales orders can only be fulfilled by deliveries."); if (destinationType != LocationType.Customer) throw Error("destinationLocationId", "Sales-order deliveries must terminate at a customer location."); var order = await sales.FindAsync(so, t); if (order is null || order.State is not ("Confirmed" or "PartiallyFulfilled")) throw Error("referenceDocumentId", "A confirmed sales order is required."); ValidateDocumentLine(order.Lines.Select(x => (x.ProductId, x.UnitCode, x.Quantity)), r.ProductId, r.Quantity); } }
     private async Task<LocationType?> ValidateStoredMoveLocations(StockMove move, CancellationToken t)
     {

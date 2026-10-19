@@ -1,10 +1,13 @@
 using Erp.Abstractions.Context;
+using Erp.Abstractions.Persistence;
+using System.Data.Common;
 #pragma warning disable CA1725
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
+using Microsoft.EntityFrameworkCore.Storage;
 namespace Erp.Modules.Inventory;
 
-public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> options, ITenantContext? tenant = null, ICompanyContext? company = null) : DbContext(options)
+public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> options, ITenantContext? tenant = null, ICompanyContext? company = null) : DbContext(options), ITransactionParticipant
 {
     private Guid TenantId => tenant?.TenantId?.Value ?? Guid.Empty;
     private Guid CompanyId => company?.CompanyId?.Value ?? Guid.Empty;
@@ -12,6 +15,19 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
     public DbSet<StockLocation> Locations => Set<StockLocation>();
     public DbSet<StockMove> StockMoves => Set<StockMove>();
     public DbSet<StockReservation> Reservations => Set<StockReservation>();
+
+    DbConnection ITransactionParticipant.Connection => Database.GetDbConnection();
+    bool ITransactionParticipant.HasPendingChanges => ChangeTracker.HasChanges();
+
+    async Task ITransactionParticipant.EnlistAsync(DbTransaction? transaction, CancellationToken cancellationToken)
+    {
+        if (transaction is not null && Database.CurrentTransaction is { } current &&
+            !ReferenceEquals(current.GetDbTransaction(), transaction))
+            throw new InvalidOperationException("An unrelated Inventory transaction is already active.");
+        _ = await Database.UseTransactionAsync(transaction, cancellationToken);
+    }
+
+    void ITransactionParticipant.DiscardChanges() => ChangeTracker.Clear();
 
     protected override void OnModelCreating(ModelBuilder b)
     {

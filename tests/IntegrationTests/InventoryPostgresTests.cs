@@ -2,6 +2,7 @@ using Erp.Abstractions.Context;
 using Erp.Abstractions.Auditing;
 using Erp.Abstractions.Events;
 using Erp.Abstractions.Sequences;
+using Erp.Infrastructure.Persistence;
 using Erp.Modules.Inventory;
 using Erp.Modules.Products.Contracts;
 using Erp.Modules.Purchasing.Contracts;
@@ -11,8 +12,14 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 namespace Erp.IntegrationTests;
 
-public sealed class InventoryPostgresTests
+public sealed class InventoryPostgresTests : IAsyncLifetime
 {
+    private readonly System.Collections.Concurrent.ConcurrentBag<PlatformDbContext> _platformContexts = [];
+    public Task InitializeAsync() => Task.CompletedTask;
+    public async Task DisposeAsync()
+    {
+        while (_platformContexts.TryTake(out var context)) await context.DisposeAsync();
+    }
     [Fact] public async Task LedgerIsCompanyIsolatedAndCompletedMovesAreImmutable() { var pg = await IntegrationContainers.StartPostgresAsync("inventory_tests"); await using (pg) { var tenant = Guid.NewGuid(); var company = Guid.NewGuid(); var location = Guid.NewGuid(); var product = Guid.NewGuid(); var moveId = Guid.NewGuid(); var options = new DbContextOptionsBuilder<InventoryDbContext>().UseNpgsql(pg.GetConnectionString()).Options; await using (var migration = new InventoryDbContext(options)) await migration.Database.MigrateAsync(); await using (var write = new InventoryDbContext(options, new T(tenant), new C(company))) { write.Locations.Add(new() { Id = location, TenantId = tenant, CompanyId = company, Code = "MAIN", Name = "Main", Type = LocationType.Internal, IsActive = true, ConcurrencyStamp = Guid.NewGuid().ToString("N") }); write.StockMoves.Add(new() { Id = moveId, TenantId = tenant, CompanyId = company, Number = "MOVE-TEST-1", Type = StockMoveType.Adjustment, State = StockMoveState.Completed, ProductId = product, ProductSku = "SKU", UnitCode = "EA", Quantity = 10, DestinationLocationId = location, BusinessDate = DateOnly.FromDateTime(DateTime.Today), CreatedAtUtc = DateTimeOffset.UtcNow, CompletedAtUtc = DateTimeOffset.UtcNow, ConcurrencyStamp = Guid.NewGuid().ToString("N") }); await write.SaveChangesAsync(); } await using var visible = new InventoryDbContext(options, new T(tenant), new C(company)); await using var hidden = new InventoryDbContext(options, new T(tenant), new C(Guid.NewGuid())); Assert.Single(await visible.StockMoves.ToListAsync()); Assert.Empty(await hidden.StockMoves.ToListAsync()); var completed = await visible.StockMoves.SingleAsync(); completed.Notes = "illegal edit"; await Assert.ThrowsAsync<InvalidOperationException>(() => visible.SaveChangesAsync()); } }
     [Fact]
     public async Task ConcurrentReservationsCannotExceedStockAndDeliveryConsumesOnlyItsOrderReservation()
@@ -22,6 +29,8 @@ public sealed class InventoryPostgresTests
         {
             var tenant = Guid.NewGuid(); var company = Guid.NewGuid(); var warehouse = Guid.NewGuid(); var location = Guid.NewGuid(); var supplier = Guid.NewGuid(); var customer = Guid.NewGuid(); var gain = Guid.NewGuid(); var loss = Guid.NewGuid(); var product = Guid.NewGuid(); var secondProduct = Guid.NewGuid(); var order = Guid.NewGuid(); var purchaseOrder = Guid.NewGuid();
             var options = new DbContextOptionsBuilder<InventoryDbContext>().UseNpgsql(pg.GetConnectionString()).Options;
+            await using (var platformMigration = new PlatformDbContext(new DbContextOptionsBuilder<PlatformDbContext>()
+                .UseNpgsql(pg.GetConnectionString()).Options)) await platformMigration.Database.MigrateAsync();
             await using (var migration = new InventoryDbContext(options)) await migration.Database.MigrateAsync();
             await using (var seed = new InventoryDbContext(options, new T(tenant), new C(company)))
             {
@@ -167,7 +176,15 @@ public sealed class InventoryPostgresTests
         }
     }
 
-    private static InventoryService Service(InventoryDbContext db, Guid tenant, Guid company, Guid product, Guid order, Guid purchaseOrder, Audit? audit = null, Outbox? outbox = null, Guid? additionalProduct = null) => new(db, new T(tenant), new C(company), new Products(product, additionalProduct), new Sales(order, product), new Purchasing(purchaseOrder, product), new Sequences(), new Clock(), audit ?? new Audit(), outbox ?? new Outbox(), new HttpContextAccessor());
+    private InventoryService Service(InventoryDbContext db, Guid tenant, Guid company, Guid product, Guid order, Guid purchaseOrder, Audit? audit = null, Outbox? outbox = null, Guid? additionalProduct = null)
+    {
+        var platform = new PlatformDbContext(new DbContextOptionsBuilder<PlatformDbContext>()
+            .UseNpgsql(db.Database.GetDbConnection()).Options, new T(tenant));
+        _platformContexts.Add(platform);
+        return new(db, new T(tenant), new C(company), new Products(product, additionalProduct), new Sales(order, product),
+            new Purchasing(purchaseOrder, product), new Sequences(), new Clock(), audit ?? new Audit(), outbox ?? new Outbox(),
+            new HttpContextAccessor(), new BusinessTransactionCoordinator(platform));
+    }
     private static string Stamp() => Guid.NewGuid().ToString("N");
     private sealed class T(Guid id) : ITenantContext { public TenantId? TenantId { get; } = new(id); }
     private sealed class C(Guid id) : ICompanyContext { public CompanyId? CompanyId { get; } = new(id); }
