@@ -1,12 +1,29 @@
 using Erp.Abstractions.Context;
+using Erp.Abstractions.Persistence;
+using System.Data.Common;
 #pragma warning disable CA1725
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
+using Microsoft.EntityFrameworkCore.Storage;
 namespace Erp.Modules.Purchasing;
 
-public sealed class PurchasingDbContext(DbContextOptions<PurchasingDbContext> options, ITenantContext? tenant = null, ICompanyContext? company = null) : DbContext(options)
+public sealed class PurchasingDbContext(DbContextOptions<PurchasingDbContext> options, ITenantContext? tenant = null, ICompanyContext? company = null) : DbContext(options), ITransactionParticipant
 {
     private readonly ITenantContext? _tenant = tenant; private readonly ICompanyContext? _company = company; private Guid TenantId => _tenant?.TenantId?.Value ?? Guid.Empty; private Guid CompanyId => _company?.CompanyId?.Value ?? Guid.Empty; public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>(); public DbSet<PurchaseOrderLine> PurchaseOrderLines => Set<PurchaseOrderLine>();
+
+    DbConnection ITransactionParticipant.Connection => Database.GetDbConnection();
+    bool ITransactionParticipant.HasPendingChanges => ChangeTracker.HasChanges();
+
+    async Task ITransactionParticipant.EnlistAsync(DbTransaction? transaction, CancellationToken cancellationToken)
+    {
+        if (transaction is not null && Database.CurrentTransaction is { } current &&
+            !ReferenceEquals(current.GetDbTransaction(), transaction))
+            throw new InvalidOperationException("An unrelated Purchasing transaction is already active.");
+        _ = await Database.UseTransactionAsync(transaction, cancellationToken);
+    }
+
+    void ITransactionParticipant.DiscardChanges() => ChangeTracker.Clear();
+
     protected override void OnModelCreating(ModelBuilder builder) { builder.HasDefaultSchema("purchasing"); builder.Entity<PurchaseOrder>(entity => { entity.ToTable("purchase_orders", table => table.HasCheckConstraint("CK_purchase_orders_totals", "\"Subtotal\">=0 AND \"DiscountTotal\">=0 AND \"TaxTotal\">=0 AND \"Total\">=0 AND \"ExchangeRate\">0")); entity.HasKey(x => x.Id); entity.HasAlternateKey(x => new { x.TenantId, x.CompanyId, x.Id }); entity.Property(x => x.Number).HasMaxLength(50); entity.Property(x => x.SupplierName).HasMaxLength(200); entity.Property(x => x.SupplierTaxNumber).HasMaxLength(100); foreach (var name in new[] { nameof(PurchaseOrder.AddressLine1), nameof(PurchaseOrder.AddressLine2), nameof(PurchaseOrder.City), nameof(PurchaseOrder.StateOrProvince), nameof(PurchaseOrder.PostalCode) }) entity.Property(name).HasMaxLength(200); entity.Property(x => x.CountryCode).HasMaxLength(2); entity.Property(x => x.CurrencyCode).HasMaxLength(3); entity.Property(x => x.BaseCurrencyCode).HasMaxLength(3); entity.Property(x => x.ExchangeRate).HasPrecision(18, 8); entity.Property(x => x.State).HasConversion<string>().HasMaxLength(24); foreach (var name in new[] { nameof(PurchaseOrder.Subtotal), nameof(PurchaseOrder.DiscountTotal), nameof(PurchaseOrder.TaxTotal), nameof(PurchaseOrder.Total) }) entity.Property(name).HasPrecision(18, 4); entity.Property(x => x.Notes).HasMaxLength(4000); entity.Property(x => x.ConcurrencyStamp).HasMaxLength(32).IsConcurrencyToken(); entity.HasIndex(x => new { x.TenantId, x.CompanyId, x.Number }).IsUnique(); entity.HasIndex(x => new { x.TenantId, x.CompanyId, x.SupplierId }); entity.HasIndex(x => new { x.TenantId, x.CompanyId, x.State, x.UpdatedAtUtc }); entity.HasQueryFilter(x => x.TenantId == TenantId && x.CompanyId == CompanyId); entity.HasMany(x => x.Lines).WithOne().HasForeignKey(x => new { x.TenantId, x.CompanyId, x.PurchaseOrderId }).HasPrincipalKey(x => new { x.TenantId, x.CompanyId, x.Id }).OnDelete(DeleteBehavior.Cascade); }); builder.Entity<PurchaseOrderLine>(entity => { entity.ToTable("purchase_order_lines", table => table.HasCheckConstraint("CK_purchase_order_lines_values", "\"Quantity\">0 AND \"UnitPrice\">=0 AND \"DiscountPercent\" BETWEEN 0 AND 100 AND \"TaxPercent\" BETWEEN 0 AND 100 AND \"Total\">=0")); entity.HasKey(x => x.Id); entity.Property(x => x.ProductSku).HasMaxLength(100); entity.Property(x => x.Description).HasMaxLength(500); entity.Property(x => x.UnitCode).HasMaxLength(20); foreach (var name in new[] { nameof(PurchaseOrderLine.Quantity), nameof(PurchaseOrderLine.UnitPrice), nameof(PurchaseOrderLine.DiscountPercent), nameof(PurchaseOrderLine.TaxPercent), nameof(PurchaseOrderLine.Subtotal), nameof(PurchaseOrderLine.DiscountAmount), nameof(PurchaseOrderLine.TaxAmount), nameof(PurchaseOrderLine.Total) }) entity.Property(name).HasPrecision(18, 4); entity.HasIndex(x => new { x.PurchaseOrderId, x.Sequence }).IsUnique(); entity.HasQueryFilter(x => x.TenantId == TenantId && x.CompanyId == CompanyId); }); }
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken token = default) { var values = ChangeTracker.Entries().Where(x => x.Entity is PurchaseOrder or PurchaseOrderLine && x.State is EntityState.Added or EntityState.Modified or EntityState.Deleted).Select(x => x.Entity).ToArray(); if (values.Length > 0) { var tenant = _tenant?.TenantId?.Value ?? throw new InvalidOperationException("An active tenant is required."); var company = _company?.CompanyId?.Value ?? throw new InvalidOperationException("An active company is required."); if (values.Any(x => x switch { PurchaseOrder o => o.TenantId != tenant || o.CompanyId != company, PurchaseOrderLine l => l.TenantId != tenant || l.CompanyId != company, _ => false })) throw new InvalidOperationException("Cross-tenant or cross-company purchasing writes are not permitted."); } return base.SaveChangesAsync(acceptAllChangesOnSuccess, token); }
 }

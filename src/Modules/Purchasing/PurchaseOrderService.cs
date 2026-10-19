@@ -5,6 +5,7 @@ using Erp.Abstractions.Auditing;
 using Erp.Abstractions.Context;
 using Erp.Abstractions.Currencies;
 using Erp.Abstractions.Events;
+using Erp.Abstractions.Persistence;
 using Erp.Abstractions.Sequences;
 using Erp.Modules.Contacts.Contracts;
 using Erp.Modules.Products.Contracts;
@@ -13,16 +14,71 @@ using Microsoft.EntityFrameworkCore;
 namespace Erp.Modules.Purchasing;
 
 public interface IPurchaseOrderService { Task<PurchaseOrderPage> SearchAsync(PurchaseOrderQuery query, CancellationToken token); Task<PurchaseOrderDto?> GetAsync(Guid id, CancellationToken token); Task<PurchaseOrderDto> CreateAsync(PurchaseOrderRequest request, CancellationToken token); Task<PurchaseOrderDto> UpdateAsync(Guid id, PurchaseOrderRequest request, CancellationToken token); Task<PurchaseOrderDto> TransitionAsync(Guid id, PurchaseOrderState target, string stamp, CancellationToken token); Task<PurchaseOrderDto> SetArchivedAsync(Guid id, string stamp, bool archived, CancellationToken token); }
-public sealed class PurchaseOrderService(PurchasingDbContext database, ITenantContext tenant, ICompanyContext company, ISupplierDocumentDirectory suppliers, IPurchasingProductDirectory products, ICurrencyConfigurationService currencies, ISequenceService sequences, IClock clock, IAuditLogWriter audit, IOutboxWriter outbox, IHttpContextAccessor http) : IPurchaseOrderService
+public sealed class PurchaseOrderService(PurchasingDbContext database, ITenantContext tenant, ICompanyContext company,
+    ISupplierDocumentDirectory suppliers, IPurchasingProductDirectory products, ICurrencyConfigurationService currencies,
+    ISequenceService sequences, IClock clock, IAuditLogWriter audit, IOutboxWriter outbox, IHttpContextAccessor http,
+    IBusinessTransactionCoordinator transactions) : IPurchaseOrderService
 {
     public async Task<PurchaseOrderPage> SearchAsync(PurchaseOrderQuery q, CancellationToken t) { if (q.Page < 1 || q.PageSize is < 1 or > 100 || q.Sort.ToLowerInvariant() is not ("updated" or "date" or "number" or "total")) throw Error("page", "Invalid paging or sorting parameters."); var s = database.PurchaseOrders.AsNoTracking().Include(x => x.Lines).AsQueryable(); if (!q.IncludeArchived) s = s.Where(x => !x.IsArchived); if (q.State is not null) s = s.Where(x => x.State == q.State); if (!string.IsNullOrWhiteSpace(q.Search)) { var term = q.Search.Trim(); s = s.Where(x => EF.Functions.ILike(x.Number, $"%{term}%") || EF.Functions.ILike(x.SupplierName, $"%{term}%")); } s = (q.Sort.ToLowerInvariant(), q.Descending) switch { ("number", false) => s.OrderBy(x => x.Number), ("number", true) => s.OrderByDescending(x => x.Number), ("date", false) => s.OrderBy(x => x.OrderDate), ("date", true) => s.OrderByDescending(x => x.OrderDate), ("total", false) => s.OrderBy(x => x.Total), ("total", true) => s.OrderByDescending(x => x.Total), ("updated", false) => s.OrderBy(x => x.UpdatedAtUtc), _ => s.OrderByDescending(x => x.UpdatedAtUtc) }; var total = await s.CountAsync(t); var items = await s.Skip((q.Page - 1) * q.PageSize).Take(q.PageSize).ToListAsync(t); return new(q.Page, q.PageSize, total, items.Select(Dto).ToList()); }
     public async Task<PurchaseOrderDto?> GetAsync(Guid id, CancellationToken t) => (await database.PurchaseOrders.AsNoTracking().Include(x => x.Lines).SingleOrDefaultAsync(x => x.Id == id, t)) is { } x ? Dto(x) : null;
-    public async Task<PurchaseOrderDto> CreateAsync(PurchaseOrderRequest r, CancellationToken t) { Validate(r, false); var supplier = await Supplier(r.SupplierId, t); var currency = await Currency(r.CurrencyCode, r.OrderDate, t); var now = clock.UtcNow; var x = new PurchaseOrder { Id = Guid.NewGuid(), TenantId = Tenant(), CompanyId = Company(), Number = await sequences.NextAsync(new("purchasing.order", "PO-{yyyy}-", 6, r.OrderDate), t), SupplierId = supplier.Id, SupplierName = supplier.DisplayName, SupplierTaxNumber = supplier.TaxNumber, CurrencyCode = currency.code, BaseCurrencyCode = currency.baseCode, ExchangeRate = currency.rate, OrderDate = r.OrderDate, ExpectedDeliveryDate = r.ExpectedDeliveryDate, State = PurchaseOrderState.Draft, Notes = Clean(r.Notes), CreatedAtUtc = now, UpdatedAtUtc = now, CreatedBy = User(), UpdatedBy = User(), ConcurrencyStamp = Stamp() }; Copy(supplier.BillingAddress, x); x.Lines = await Lines(x, r.Lines, t); Calculate(x); database.PurchaseOrders.Add(x); await Save(t); await Audit("purchasing.purchase_order.created", x, t); return Dto(x); }
-    public async Task<PurchaseOrderDto> UpdateAsync(Guid id, PurchaseOrderRequest r, CancellationToken t) { Validate(r, true); var x = await Find(id, t); Check(x, r.ConcurrencyStamp!); if (x.State != PurchaseOrderState.Draft) throw Error("state", "Only draft purchase orders can be edited."); var supplier = await Supplier(r.SupplierId, t); var currency = await Currency(r.CurrencyCode, r.OrderDate, t); database.PurchaseOrderLines.RemoveRange(x.Lines); x.SupplierId = supplier.Id; x.SupplierName = supplier.DisplayName; x.SupplierTaxNumber = supplier.TaxNumber; Copy(supplier.BillingAddress, x); x.CurrencyCode = currency.code; x.BaseCurrencyCode = currency.baseCode; x.ExchangeRate = currency.rate; x.OrderDate = r.OrderDate; x.ExpectedDeliveryDate = r.ExpectedDeliveryDate; x.Notes = Clean(r.Notes); x.Lines = await Lines(x, r.Lines, t); Calculate(x); Touch(x); await Save(t); await Audit("purchasing.purchase_order.updated", x, t); return Dto(x); }
-    public async Task<PurchaseOrderDto> TransitionAsync(Guid id, PurchaseOrderState target, string stamp, CancellationToken t) { var x = await Find(id, t); Check(x, stamp); var allowed = (x.State, target) switch { (PurchaseOrderState.Draft, PurchaseOrderState.Sent) => true, (PurchaseOrderState.Draft or PurchaseOrderState.Sent, PurchaseOrderState.Confirmed) => true, (PurchaseOrderState.Draft or PurchaseOrderState.Sent or PurchaseOrderState.Confirmed, PurchaseOrderState.Cancelled) => true, _ => false }; if (!allowed) throw Error("state", $"Cannot move purchase order from {x.State} to {target}."); x.State = target; Touch(x); await Save(t); if (target == PurchaseOrderState.Confirmed) { outbox.Add(new PurchaseOrderConfirmedEvent(Guid.NewGuid(), clock.UtcNow, x.Id, x.Number, x.SupplierId, x.CurrencyCode, x.Total)); outbox.Add(new GoodsReceiptRequestedEvent(Guid.NewGuid(), clock.UtcNow, x.Id, x.Number)); } if (target == PurchaseOrderState.Cancelled) outbox.Add(new PurchaseOrderCancelledEvent(Guid.NewGuid(), clock.UtcNow, x.Id, x.Number)); await Audit($"purchasing.purchase_order.{target.ToString().ToLowerInvariant()}", x, t); return Dto(x); }
-    public async Task<PurchaseOrderDto> SetArchivedAsync(Guid id, string stamp, bool archived, CancellationToken t) { var x = await Find(id, t); Check(x, stamp); if (archived && x.State != PurchaseOrderState.Cancelled && x.State != PurchaseOrderState.Received) throw Error("state", "Only cancelled or received purchase orders can be archived."); x.IsArchived = archived; Touch(x); await Save(t); await Audit(archived ? "purchasing.purchase_order.archived" : "purchasing.purchase_order.reactivated", x, t); return Dto(x); }
+    public async Task<PurchaseOrderDto> CreateAsync(PurchaseOrderRequest r, CancellationToken t)
+    {
+        Validate(r, false);
+        await using var transaction = await transactions.BeginAsync(database, t);
+        var supplier = await Supplier(r.SupplierId, t); var currency = await Currency(r.CurrencyCode, r.OrderDate, t); var now = clock.UtcNow;
+        var x = new PurchaseOrder { Id = Guid.NewGuid(), TenantId = Tenant(), CompanyId = Company(), Number = await sequences.NextAsync(new("purchasing.order", "PO-{yyyy}-", 6, r.OrderDate), t), SupplierId = supplier.Id, SupplierName = supplier.DisplayName, SupplierTaxNumber = supplier.TaxNumber, CurrencyCode = currency.code, BaseCurrencyCode = currency.baseCode, ExchangeRate = currency.rate, OrderDate = r.OrderDate, ExpectedDeliveryDate = r.ExpectedDeliveryDate, State = PurchaseOrderState.Draft, Notes = Clean(r.Notes), CreatedAtUtc = now, UpdatedAtUtc = now, CreatedBy = User(), UpdatedBy = User(), ConcurrencyStamp = Stamp() };
+        Copy(supplier.BillingAddress, x); x.Lines = await Lines(x, r.Lines, t); Calculate(x); database.PurchaseOrders.Add(x); await Save(t); await Audit("purchasing.purchase_order.created", x, t);
+        var result = Dto(x);
+        await transaction.CommitAsync(t);
+        return result;
+    }
+    public async Task<PurchaseOrderDto> UpdateAsync(Guid id, PurchaseOrderRequest r, CancellationToken t)
+    {
+        Validate(r, true);
+        await using var transaction = await transactions.BeginAsync(database, t);
+        var x = await Find(id, t); Check(x, r.ConcurrencyStamp!); if (x.State != PurchaseOrderState.Draft) throw Error("state", "Only draft purchase orders can be edited.");
+        var supplier = await Supplier(r.SupplierId, t); var currency = await Currency(r.CurrencyCode, r.OrderDate, t); database.PurchaseOrderLines.RemoveRange(x.Lines);
+        x.SupplierId = supplier.Id; x.SupplierName = supplier.DisplayName; x.SupplierTaxNumber = supplier.TaxNumber; Copy(supplier.BillingAddress, x); x.CurrencyCode = currency.code; x.BaseCurrencyCode = currency.baseCode; x.ExchangeRate = currency.rate; x.OrderDate = r.OrderDate; x.ExpectedDeliveryDate = r.ExpectedDeliveryDate; x.Notes = Clean(r.Notes);
+        x.Lines = await Lines(x, r.Lines, t);
+        database.PurchaseOrderLines.AddRange(x.Lines);
+        Calculate(x); Touch(x); await Save(t); await Audit("purchasing.purchase_order.updated", x, t);
+        var result = Dto(x);
+        await transaction.CommitAsync(t);
+        return result;
+    }
+    public async Task<PurchaseOrderDto> TransitionAsync(Guid id, PurchaseOrderState target, string stamp, CancellationToken t)
+    {
+        await using var transaction = await transactions.BeginAsync(database, t);
+        var x = await Find(id, t); Check(x, stamp); var allowed = (x.State, target) switch { (PurchaseOrderState.Draft, PurchaseOrderState.Sent) => true, (PurchaseOrderState.Draft or PurchaseOrderState.Sent, PurchaseOrderState.Confirmed) => true, (PurchaseOrderState.Draft or PurchaseOrderState.Sent or PurchaseOrderState.Confirmed, PurchaseOrderState.Cancelled) => true, _ => false }; if (!allowed) throw Error("state", $"Cannot move purchase order from {x.State} to {target}.");
+        x.State = target; Touch(x); await Save(t); if (target == PurchaseOrderState.Confirmed) { outbox.Add(new PurchaseOrderConfirmedEvent(Guid.NewGuid(), clock.UtcNow, x.Id, x.Number, x.SupplierId, x.CurrencyCode, x.Total)); outbox.Add(new GoodsReceiptRequestedEvent(Guid.NewGuid(), clock.UtcNow, x.Id, x.Number)); }
+        if (target == PurchaseOrderState.Cancelled) outbox.Add(new PurchaseOrderCancelledEvent(Guid.NewGuid(), clock.UtcNow, x.Id, x.Number)); await Audit($"purchasing.purchase_order.{target.ToString().ToLowerInvariant()}", x, t);
+        var result = Dto(x);
+        await transaction.CommitAsync(t);
+        return result;
+    }
+    public async Task<PurchaseOrderDto> SetArchivedAsync(Guid id, string stamp, bool archived, CancellationToken t)
+    {
+        await using var transaction = await transactions.BeginAsync(database, t);
+        var x = await Find(id, t); Check(x, stamp); if (archived && x.State != PurchaseOrderState.Cancelled && x.State != PurchaseOrderState.Received) throw Error("state", "Only cancelled or received purchase orders can be archived.");
+        x.IsArchived = archived; Touch(x); await Save(t); await Audit(archived ? "purchasing.purchase_order.archived" : "purchasing.purchase_order.reactivated", x, t);
+        var result = Dto(x);
+        await transaction.CommitAsync(t);
+        return result;
+    }
     internal static (decimal subtotal, decimal discount, decimal tax, decimal total) CalculateLine(decimal quantity, decimal price, decimal discountPercent, decimal taxPercent) { if (quantity <= 0 || price < 0 || discountPercent is < 0 or > 100 || taxPercent is < 0 or > 100) throw Error("lines", "Invalid line values."); var subtotal = Round(quantity * price); var discount = Round(subtotal * discountPercent / 100m); var tax = Round((subtotal - discount) * taxPercent / 100m); return (subtotal, discount, tax, Round(subtotal - discount + tax)); }
-    private async Task<List<PurchaseOrderLine>> Lines(PurchaseOrder o, IReadOnlyList<PurchaseOrderLineRequest> requests, CancellationToken t) { var refs = await products.FindAsync(requests.Select(x => x.ProductId).Distinct().ToArray(), t); var lines = new List<PurchaseOrderLine>(); var seq = 0; foreach (var r in requests) { if (!refs.TryGetValue(r.ProductId, out var p) || p.IsArchived) throw Error("lines", "Every product must be active in the current company."); if (!StringComparer.OrdinalIgnoreCase.Equals(p.CurrencyCode, o.CurrencyCode) && r.UnitPrice is null) throw Error("lines", "A unit price is required for a different product currency."); var price = r.UnitPrice ?? p.Cost; var v = CalculateLine(r.Quantity, price, r.DiscountPercent, r.TaxPercent); lines.Add(new() { Id = Guid.NewGuid(), TenantId = o.TenantId, CompanyId = o.CompanyId, PurchaseOrderId = o.Id, Sequence = ++seq, ProductId = p.Id, ProductSku = p.Sku, Description = string.IsNullOrWhiteSpace(r.Description) ? p.Name : r.Description.Trim(), UnitCode = p.PurchaseUnitCode, Quantity = r.Quantity, UnitPrice = price, DiscountPercent = r.DiscountPercent, TaxPercent = r.TaxPercent, Subtotal = v.subtotal, DiscountAmount = v.discount, TaxAmount = v.tax, Total = v.total }); } return lines; }
+    private async Task<List<PurchaseOrderLine>> Lines(PurchaseOrder o, IReadOnlyList<PurchaseOrderLineRequest> requests, CancellationToken t)
+    {
+        var ids = requests.Select(x => x.ProductId).Distinct().ToArray();
+        var refs = new Dictionary<Guid, PurchasingProductReference>();
+        foreach (var batch in ids.Chunk(100))
+        {
+            var batchReferences = await products.FindAsync(batch, t);
+            foreach (var reference in batchReferences) refs[reference.Key] = reference.Value;
+        }
+        var lines = new List<PurchaseOrderLine>(); var seq = 0;
+        foreach (var r in requests) { if (!refs.TryGetValue(r.ProductId, out var p) || p.IsArchived) throw Error("lines", "Every product must be active in the current company."); if (!StringComparer.OrdinalIgnoreCase.Equals(p.CurrencyCode, o.CurrencyCode) && r.UnitPrice is null) throw Error("lines", "A unit price is required for a different product currency."); var price = r.UnitPrice ?? p.Cost; var v = CalculateLine(r.Quantity, price, r.DiscountPercent, r.TaxPercent); lines.Add(new() { Id = Guid.NewGuid(), TenantId = o.TenantId, CompanyId = o.CompanyId, PurchaseOrderId = o.Id, Sequence = ++seq, ProductId = p.Id, ProductSku = p.Sku, Description = string.IsNullOrWhiteSpace(r.Description) ? p.Name : r.Description.Trim(), UnitCode = p.PurchaseUnitCode, Quantity = r.Quantity, UnitPrice = price, DiscountPercent = r.DiscountPercent, TaxPercent = r.TaxPercent, Subtotal = v.subtotal, DiscountAmount = v.discount, TaxAmount = v.tax, Total = v.total }); }
+        return lines;
+    }
     private static void Calculate(PurchaseOrder x) { x.Subtotal = Round(x.Lines.Sum(l => l.Subtotal)); x.DiscountTotal = Round(x.Lines.Sum(l => l.DiscountAmount)); x.TaxTotal = Round(x.Lines.Sum(l => l.TaxAmount)); x.Total = Round(x.Lines.Sum(l => l.Total)); }
     private async Task<CustomerDocumentReference> Supplier(Guid id, CancellationToken t) { var x = await suppliers.FindAsync(id, t); if (x is null || x.IsArchived) throw Error("supplierId", "An active supplier in the current company is required."); return x; }
     private async Task<(string code, string baseCode, decimal rate)> Currency(string? requested, DateOnly date, CancellationToken t) { var c = await currencies.GetAsync(t); var code = string.IsNullOrWhiteSpace(requested) ? c.BaseCurrencyCode : requested.Trim().ToUpperInvariant(); if (!c.Currencies.Any(x => x.IsActive && x.Code == code)) throw Error("currencyCode", "An active currency is required."); if (code == c.BaseCurrencyCode) return (code, c.BaseCurrencyCode, 1m); var rate = c.ExchangeRates.Where(x => x.FromCurrencyCode == code && x.ToCurrencyCode == c.BaseCurrencyCode && x.EffectiveDate <= date).MaxBy(x => x.EffectiveDate) ?? throw Error("currencyCode", "No effective exchange rate exists."); return (code, c.BaseCurrencyCode, rate.Rate); }
