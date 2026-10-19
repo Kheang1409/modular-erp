@@ -36,13 +36,17 @@ and `IBusinessTransactionCoordinator`; a module implements `ITransactionParticip
 using its own DbContext. Modules never access platform entities or another
 module's schema to participate.
 
-Contacts, Products, CRM, Sales, and Purchasing have adopted this boundary. Their mutations share
+Contacts, Products, CRM, Sales, Purchasing, and Inventory have adopted this boundary. Their mutations share
 one physical connection and transaction with platform audit and any staged
 outbox messages. CRM also covers stages, assignments, activity completion/reopening,
 and lead conversion with both audit entries. Sales includes quotation/order
 headers and lines, transactional number allocation, and its existing outbox events.
 Purchasing includes purchase-order headers and lines, number allocation, and its
 existing confirmation, cancellation, and goods-receipt-request messages.
+Inventory includes warehouse/location changes, movements and batches, completion,
+corrections, and reservation creation/release/consumption. Its existing advisory
+locks remain transaction-scoped on the shared connection, and completed ledger
+entries remain immutable. Existing event contracts and isolation levels are unchanged.
 The coordinator flushes pending
 platform changes before committing. Ordinary Contacts and Products CSV imports
 preserve independent transactions per valid row.

@@ -7,8 +7,8 @@ Definitions are unique by tenant, company, and key. PostgreSQL creates a missing
 The first call fixes a key's prefix template and padding; later calls with conflicting configuration are rejected. Padding and positive-counter invariants also have database check constraints. Counters do not currently reset by fiscal period.
 
 Allocation joins an active platform transaction, including an explicitly enlisted
-[business transaction](overview.md#business-transaction-boundary). Sales and
-Purchasing begin that boundary before allocation, so rollback restores the
+[business transaction](overview.md#business-transaction-boundary). Sales,
+Purchasing, and Inventory begin that boundary before allocation, so rollback restores the
 definition/counter along with the document. Without an active transaction, the
 allocator commits its own short transaction; a later caller failure cannot reclaim
 that allocation. This is not a legal gapless-numbering guarantee. Modules needing

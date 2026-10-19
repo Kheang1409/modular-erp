@@ -103,13 +103,50 @@ are explicitly staged as new rows to avoid false edit-concurrency failures.
 
 This changes no schema, permission, event payload, or state-transition rule. A
 receipt-request message is not a completed Inventory receipt, and it does not make
-downstream consumer effects atomic with the purchase order. Inventory and Accounting
-remain separate adoption work. The existing outbox delivery semantics and numbering
+downstream consumer effects atomic with the purchase order. Inventory adoption is
+described below; Accounting remains separate work. The existing outbox delivery semantics and numbering
 caveats still apply.
 
 Purchase-order lists and details also use named, keyboard-accessible scroll regions
 to contain wide rows on mobile. PostgreSQL regressions and an authenticated browser
 lifecycle check protect both the persistence boundary and the rendered workflow.
+
+## Inventory: stock safety and one durable outcome
+
+Inventory now shares its ledger/configuration/reservation transaction with platform
+audit and existing outbox events. Warehouse and location changes, movement drafts
+and batches, completion, compensating corrections, reservation creation/release,
+and delivery consumption all use the explicit shared boundary.
+
+The existing advisory stock/document/key locks and Read Committed isolation remain
+in place. Completed movements are still immutable. Correcting history creates a
+separately numbered draft compensating movement, not an edit or deletion of the
+original ledger entry. Number allocation and every batch audit flush now join the
+same transaction, so a late failure cannot leave half a batch or a consumed
+reservation committed without its movement evidence.
+
+The review also exposed a reservation-release race: a request could pass its version
+check, wait for the stock lock, then overwrite a newer release. Rechecking the record
+under the lock preserves a same-key replay while rejecting a different-key stale
+writer without another release audit/event. Successful replay paths also complete
+their nested transaction scope, keeping caller-owned work intact.
+Completion retries now normalize keys the same way they are stored, avoiding a
+false concurrency error when an accepted key contains surrounding whitespace.
+
+All nine existing Inventory event contracts, quantity/location rules, permissions,
+and schema stay unchanged. Fulfillment messages do not introduce a new consumer
+that automatically changes Sales or Purchasing document state. The at-least-once
+delivery and numbering caveats still apply; Accounting remains a separate adoption.
+Populated movement, balance, reservation, warehouse, and location tables now use the same named,
+keyboard-accessible mobile scrolling pattern as Sales and Purchasing.
+Correction navigation also resets the detail page's busy state so the newly
+created draft's actions remain usable without a page reload.
+The browser check also caught a real filter-input failure: component event binding
+was passing `ChangeEventArgs` to a string callback. Inventory movement, batch, and
+warehouse filters now use native input binding, with typed-filter browser checks
+guarding the affected screens.
+Selected products and locations remain visible while filtering, preventing a
+placeholder from hiding a still-bound value that would otherwise be submitted.
 
 ## Verification should be real, not a passing no-op
 

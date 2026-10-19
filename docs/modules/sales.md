@@ -36,8 +36,8 @@ connection must not be used concurrently.
 Explicit outer transactions can compose Contacts, Products, and Sales writes;
 inner services do not commit the caller's transaction. This adoption changes no
 schema, permissions, state-transition rules, or stored commercial snapshot formats.
-Inventory and Accounting still require separate adoption; Purchasing now also
-enlists through the shared transaction boundary.
+Accounting still requires separate adoption; Purchasing and Inventory now also
+enlist their own workflows through the shared transaction boundary.
 
 Quotation and order detail tables use named, keyboard-focusable scroll regions,
 so long document lines scroll locally rather than widening the mobile page.

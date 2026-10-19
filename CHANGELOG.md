@@ -4,6 +4,11 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## 0.1.0 - unreleased
 
+- Extended the shared PostgreSQL transaction boundary to Inventory configuration, movements/batches, completion/corrections, and reservation lifecycle writes, including numbering, audit, and all nine existing event contracts while retaining advisory locks and immutable completed ledger entries.
+- Rechecked reservation release after acquiring its stock lock to prevent a stale competing release from overwriting the winner or adding duplicate release evidence; same-key replays retain their existing result.
+- Normalized completion replay keys consistently with their persisted values, preventing false concurrency errors for accepted keys with surrounding whitespace.
+- Fixed Inventory product/location filters using incompatible component input-event binding, retained selected values while filtering, and reset correction-page busy state so its new draft actions remain usable without a reload.
+- Added real-PostgreSQL Inventory rollback/retry, lock/concurrency, idempotency, event/ledger, sequence, isolation, and composition coverage plus browser workflows and responsive movement/balance/reservation/warehouse/location tables.
 - Extended coordinated PostgreSQL transactions to Purchasing creation, editing, transitions, and archive/reactivate, including numbering, lines, audit, and its three existing event contracts without schema or permission changes.
 - Batched Purchasing product lookups within the 100-ID directory limit while preserving the 500-line limit, and explicitly staged replacement lines to prevent false draft-edit concurrency failures.
 - Added Purchasing rollback/retry, cancellation, sequence, event, concurrency, isolation, and outer-transaction regressions plus browser lifecycle and responsive table coverage.
