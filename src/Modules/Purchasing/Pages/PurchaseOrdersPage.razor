@@ -1,5 +1,30 @@
 @page "/purchasing/orders"
 @attribute [Authorize(Policy=PurchasingPermissions.Read)]
 @inject IPurchaseOrderService Orders
-<PageTitle>Purchase orders</PageTitle><article class="card contacts-card"><p class="eyebrow">Purchasing</p><h1>Purchase orders</h1><p><a class="button" href="/purchasing/orders/new">New purchase order</a></p><EditForm Model="Filter" OnValidSubmit="Load" FormName="purchase-order-filter"><label>Search <InputText @bind-Value="Filter.Search"/></label><button>Search</button></EditForm>@if(_page is null){<p>Loading...</p>}else{<table><thead><tr><th>Number</th><th>Supplier</th><th>State</th><th>Total</th></tr></thead><tbody>@foreach(var x in _page.Items){<tr><td><a href="@($"/purchasing/orders/{x.Id}")">@x.Number</a></td><td>@x.SupplierName</td><td>@x.State</td><td>@x.Total.ToString("N2") @x.CurrencyCode</td></tr>}</tbody></table><p>@_page.Total order(s)</p>}</article>
+<PageTitle>Purchase orders</PageTitle>
+<article class="card contacts-card">
+    <p class="eyebrow">Purchasing</p><h1>Purchase orders</h1>
+    <p><a class="button" href="/purchasing/orders/new">New purchase order</a></p>
+    <EditForm Model="Filter" OnValidSubmit="Load" FormName="purchase-order-filter"><label>Search <InputText @bind-Value="Filter.Search" /></label><button>Search</button></EditForm>
+    @if (_page is null)
+    {
+        <p>Loading...</p>
+    }
+    else
+    {
+        <div class="table-scroll" tabindex="0" role="region" aria-label="Purchase orders">
+            <table>
+                <caption>Purchase orders</caption>
+                <thead><tr><th scope="col">Number</th><th scope="col">Supplier</th><th scope="col">State</th><th scope="col">Total</th></tr></thead>
+                <tbody>
+                    @foreach (var order in _page.Items)
+                    {
+                        <tr><td><a href="@($"/purchasing/orders/{order.Id}")">@order.Number</a></td><td>@order.SupplierName</td><td>@order.State</td><td>@order.Total.ToString("N2") @order.CurrencyCode</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <p>@_page.Total order(s)</p>
+    }
+</article>
 @code{private PurchaseOrderPage? _page;private FilterModel Filter{get;}=new();protected override Task OnInitializedAsync()=>Load();private async Task Load()=>_page=await Orders.SearchAsync(new(Filter.Search),CancellationToken.None);private sealed class FilterModel{public string? Search{get;set;}}}
