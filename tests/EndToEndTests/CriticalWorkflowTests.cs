@@ -78,6 +78,7 @@ public sealed partial class CriticalWorkflowTests(ITestOutputHelper output)
         await CrmWorkflow.VerifyAsync(page, baseUrl);
         await SalesWorkflow.VerifyAsync(page, baseUrl, productSku);
         await PurchasingWorkflow.VerifyAsync(page, baseUrl, productSku);
+        await InventoryWorkflow.VerifyAsync(page, baseUrl, productSku);
 
         await page.GotoAsync(new Uri(new Uri(baseUrl), "/products").ToString());
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Products and services", Level = 1 })).ToBeVisibleAsync();
