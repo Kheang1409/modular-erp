@@ -4,6 +4,9 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## 0.1.0 - unreleased
 
+- Extended coordinated PostgreSQL transactions to Purchasing creation, editing, transitions, and archive/reactivate, including numbering, lines, audit, and its three existing event contracts without schema or permission changes.
+- Batched Purchasing product lookups within the 100-ID directory limit while preserving the 500-line limit, and explicitly staged replacement lines to prevent false draft-edit concurrency failures.
+- Added Purchasing rollback/retry, cancellation, sequence, event, concurrency, isolation, and outer-transaction regressions plus browser lifecycle and responsive table coverage.
 - Extended coordinated PostgreSQL transactions to quotation/order writes, document numbering, audit records, and the existing Sales outbox events without schema, permission, or event-contract changes.
 - Batched Sales product lookups sequentially within the directory's 100-ID limit while retaining the 500-line quotation limit.
 - Fixed false quotation-edit concurrency errors by explicitly adding replacement line entities, and contained Sales detail tables in named keyboard-accessible scroll regions.

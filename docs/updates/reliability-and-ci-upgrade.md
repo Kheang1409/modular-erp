@@ -87,6 +87,30 @@ regressions exercise repeated replacements and failures after deleting old lines
 Sales detail tables now use the application's named, keyboard-accessible scrolling
 container to keep wide line items usable on mobile.
 
+## Purchasing: one outcome for orders and their evidence
+
+Purchasing now follows the same shared transaction boundary. Creating and editing
+purchase orders, sending/confirming/cancelling them, and archiving/reactivating
+eligible orders commit with their numbering, lines, audit records, and applicable
+outbox messages. Confirmation stages both existing messages: order confirmation
+and goods-receipt request. Cancellation retains its existing event contract.
+
+A failure after number allocation, line replacement, or a platform flush rolls back
+the whole operation. Supplier identity, tax/address facts, currency, calculated
+totals, and line snapshots keep their existing meaning. Product lookups use
+sequential 100-ID batches within the existing 500-line limit, and replacement lines
+are explicitly staged as new rows to avoid false edit-concurrency failures.
+
+This changes no schema, permission, event payload, or state-transition rule. A
+receipt-request message is not a completed Inventory receipt, and it does not make
+downstream consumer effects atomic with the purchase order. Inventory and Accounting
+remain separate adoption work. The existing outbox delivery semantics and numbering
+caveats still apply.
+
+Purchase-order lists and details also use named, keyboard-accessible scroll regions
+to contain wide rows on mobile. PostgreSQL regressions and an authenticated browser
+lifecycle check protect both the persistence boundary and the rendered workflow.
+
 ## Verification should be real, not a passing no-op
 
 Integration tests now require disposable PostgreSQL and storage containers. If
