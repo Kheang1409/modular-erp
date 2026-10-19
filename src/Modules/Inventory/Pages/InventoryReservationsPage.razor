@@ -19,7 +19,13 @@
     else if (_page is null || _page.Items.Count == 0) { <p>No reservations match the current filters.</p> }
     else
     {
-        <table><thead><tr><th>Product</th><th>Location</th><th>Reserved</th><th>Consumed</th><th>Remaining</th><th>Sales order</th><th>State</th></tr></thead><tbody>@foreach (var item in _page.Items) { <tr><td><a href="/inventory/reservations/@item.Id">@item.ProductId</a></td><td>@LocationName(item.LocationId)</td><td>@item.Quantity</td><td>@item.ConsumedQuantity</td><td>@item.RemainingQuantity</td><td>@if (item.ReferenceDocumentId is Guid orderId) { <a href="/sales/orders/@orderId">@SalesOrderName(orderId)</a> } else { <span>—</span> }</td><td>@item.State</td></tr> }</tbody></table>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="Stock reservations">
+            <table>
+                <caption>Stock reservations</caption>
+                <thead><tr><th scope="col">Product</th><th scope="col">Location</th><th scope="col">Reserved</th><th scope="col">Consumed</th><th scope="col">Remaining</th><th scope="col">Sales order</th><th scope="col">State</th></tr></thead>
+                <tbody>@foreach (var item in _page.Items) { <tr><td><a href="/inventory/reservations/@item.Id">@item.ProductId</a></td><td>@LocationName(item.LocationId)</td><td>@item.Quantity</td><td>@item.ConsumedQuantity</td><td>@item.RemainingQuantity</td><td>@if (item.ReferenceDocumentId is Guid orderId) { <a href="/sales/orders/@orderId">@SalesOrderName(orderId)</a> } else { <span>—</span> }</td><td>@item.State</td></tr> }</tbody>
+            </table>
+        </div>
         <p>Page @_page.Page · @_page.Total reservation(s)</p><button type="button" disabled="@(_page.Page <= 1)" @onclick="Previous">Previous</button> <button type="button" disabled="@(_page.Page * _page.PageSize >= _page.Total)" @onclick="Next">Next</button>
     }
 </article>

@@ -25,7 +25,7 @@
 @code {
     [Parameter] public Guid Id { get; set; }
     private readonly List<LocationDto> _locations = []; private StockMoveDto? _move; private bool _loading = true; private bool _busy; private string? _message; private string? _error;
-    protected override async Task OnParametersSetAsync() { _loading = true; _locations.Clear(); _locations.AddRange(await Http.GetFromJsonAsync<List<LocationDto>>("api/v1/inventory/locations") ?? []); try { _move = await Http.GetFromJsonAsync<StockMoveDto>($"api/v1/inventory/moves/{Id}"); } catch (HttpRequestException) { _move = null; } _loading = false; }
+    protected override async Task OnParametersSetAsync() { _loading = true; _busy = false; Clear(); _locations.Clear(); _locations.AddRange(await Http.GetFromJsonAsync<List<LocationDto>>("api/v1/inventory/locations") ?? []); try { _move = await Http.GetFromJsonAsync<StockMoveDto>($"api/v1/inventory/moves/{Id}"); } catch (HttpRequestException) { _move = null; } _loading = false; }
     private async Task Complete() => await Act(() => Http.PostAsJsonAsync($"api/v1/inventory/moves/{Id}/complete", new CompleteMoveRequest(_move!.ConcurrencyStamp, Guid.NewGuid().ToString("N"))), "Movement completed.");
     private async Task Cancel() => await Act(() => Http.PostAsJsonAsync($"api/v1/inventory/moves/{Id}/cancel", new MoveActionRequest(_move!.ConcurrencyStamp)), "Movement cancelled.");
     private async Task Correct() { _busy = true; Clear(); var response = await Http.PostAsync($"api/v1/inventory/moves/{Id}/correct", null); if (response.IsSuccessStatusCode) { var correction = await response.Content.ReadFromJsonAsync<StockMoveDto>(); Nav.NavigateTo($"/inventory/moves/{correction!.Id}"); } else { _error = await response.Content.ReadAsStringAsync(); _busy = false; } }

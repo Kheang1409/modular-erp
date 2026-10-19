@@ -23,10 +23,13 @@
     else if (_page is null || _page.Items.Count == 0) { <p>No stock balances match the current filters.</p> }
     else
     {
-        <table>
-            <thead><tr><th>SKU</th><th>Warehouse</th><th>Location</th><th>On hand</th><th>Reserved</th><th>Available</th><th>Warehouse available</th></tr></thead>
-            <tbody>@foreach (var row in _page.Items) { <tr><td>@row.ProductSku</td><td>@row.WarehouseCode</td><td>@row.LocationCode</td><td>@row.OnHand @row.UnitCode</td><td>@row.Reserved @row.UnitCode</td><td>@row.Available @row.UnitCode</td><td>@row.WarehouseAvailable @row.UnitCode</td></tr> }</tbody>
-        </table>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="Stock balances">
+            <table>
+                <caption>Stock balances</caption>
+                <thead><tr><th scope="col">SKU</th><th scope="col">Warehouse</th><th scope="col">Location</th><th scope="col">On hand</th><th scope="col">Reserved</th><th scope="col">Available</th><th scope="col">Warehouse available</th></tr></thead>
+                <tbody>@foreach (var row in _page.Items) { <tr><td>@row.ProductSku</td><td>@row.WarehouseCode</td><td>@row.LocationCode</td><td>@row.OnHand @row.UnitCode</td><td>@row.Reserved @row.UnitCode</td><td>@row.Available @row.UnitCode</td><td>@row.WarehouseAvailable @row.UnitCode</td></tr> }</tbody>
+            </table>
+        </div>
         <p>Page @_page.Page · @_page.Total balance row(s)</p>
         <button type="button" disabled="@(_page.Page <= 1)" @onclick="Previous">Previous</button>
         <button type="button" disabled="@(_page.Page * _page.PageSize >= _page.Total)" @onclick="Next">Next</button>

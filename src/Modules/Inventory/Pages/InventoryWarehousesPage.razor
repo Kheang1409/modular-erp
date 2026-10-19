@@ -42,11 +42,29 @@
         @if (_error is not null) { <p role="alert" class="validation-message">@_error</p> }
         <h2>Warehouses</h2>
         @if (_warehouses.Count == 0) { <p>No warehouses have been configured.</p> }
-        else { <table><thead><tr><th>Code</th><th>Name</th><th>Status</th><th><span class="visually-hidden">Actions</span></th></tr></thead><tbody>@foreach (var warehouse in _warehouses) { <tr><td>@warehouse.Code</td><td>@warehouse.Name</td><td>@Status(warehouse.IsActive)</td><td><AuthorizeView Policy="@InventoryPermissions.Configure"><button type="button" @onclick="() => EditWarehouse(warehouse)">Edit</button></AuthorizeView></td></tr> }</tbody></table> }
+        else
+        {
+            <div class="table-scroll" tabindex="0" role="region" aria-label="Warehouses">
+                <table>
+                    <caption>Warehouses</caption>
+                    <thead><tr><th scope="col">Code</th><th scope="col">Name</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+                    <tbody>@foreach (var warehouse in _warehouses) { <tr><td>@warehouse.Code</td><td>@warehouse.Name</td><td>@Status(warehouse.IsActive)</td><td><AuthorizeView Policy="@InventoryPermissions.Configure"><button type="button" @onclick="() => EditWarehouse(warehouse)">Edit</button></AuthorizeView></td></tr> }</tbody>
+                </table>
+            </div>
+        }
         <h2>Locations</h2>
-        <label>Filter locations <InputText @bind-Value="_locationFilter" @bind-Value:event="oninput" /></label>
+        <label>Filter locations <input @bind="_locationFilter" @bind:event="oninput" /></label>
         @if (FilteredLocations.Count == 0) { <p>No matching locations.</p> }
-        else { <table><thead><tr><th>Code</th><th>Name</th><th>Type</th><th>Warehouse</th><th>Status</th><th><span class="visually-hidden">Actions</span></th></tr></thead><tbody>@foreach (var location in FilteredLocations) { <tr><td>@location.Code</td><td>@location.Name</td><td>@location.Type</td><td>@WarehouseName(location.WarehouseId)</td><td>@Status(location.IsActive)</td><td><AuthorizeView Policy="@InventoryPermissions.Configure"><button type="button" @onclick="() => EditLocation(location)">Edit</button></AuthorizeView></td></tr> }</tbody></table> }
+        else
+        {
+            <div class="table-scroll" tabindex="0" role="region" aria-label="Locations">
+                <table>
+                    <caption>Locations</caption>
+                    <thead><tr><th scope="col">Code</th><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Warehouse</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+                    <tbody>@foreach (var location in FilteredLocations) { <tr><td>@location.Code</td><td>@location.Name</td><td>@location.Type</td><td>@WarehouseName(location.WarehouseId)</td><td>@Status(location.IsActive)</td><td><AuthorizeView Policy="@InventoryPermissions.Configure"><button type="button" @onclick="() => EditLocation(location)">Edit</button></AuthorizeView></td></tr> }</tbody>
+                </table>
+            </div>
+        }
     }
 </article>
 

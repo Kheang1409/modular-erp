@@ -24,14 +24,14 @@
                 <label>Business date <InputDate @bind-Value="_model.BusinessDate" /></label>
                 <label>Source location <InputSelect @bind-Value="_model.SourceLocationId"><option value="">Select a source</option>@foreach (var location in SourceLocations) { <option value="@location.Id">@location.Code — @location.Name (@location.Type)</option> }</InputSelect></label>
                 <label>Destination location <InputSelect @bind-Value="_model.DestinationLocationId"><option value="">Select a destination</option>@foreach (var location in DestinationLocations) { <option value="@location.Id">@location.Code — @location.Name (@location.Type)</option> }</InputSelect></label>
-                <label class="wide">Filter products <InputText @bind-Value="_productFilter" @bind-Value:event="oninput" placeholder="Search by SKU or name" /></label>
+                <label class="wide">Filter products <input @bind="_productFilter" @bind:event="oninput" placeholder="Search by SKU or name" /></label>
             </div>
             <section class="line-section" aria-labelledby="movement-lines-heading">
                 <div class="section-heading"><div><p class="eyebrow">Products</p><h2 id="movement-lines-heading">Movement lines</h2></div><button type="button" class="button-secondary" @onclick="AddLine">Add line</button></div>
                 @foreach (var line in _model.Lines)
                 {
                     <div class="line-editor" @key="line.Key">
-                        <label>Product <InputSelect @bind-Value="line.ProductId"><option value="@Guid.Empty">Select a product</option>@foreach (var product in AvailableProducts(line)) { <option value="@product.Id">@product.Sku — @product.Name</option> }</InputSelect></label>
+                        <label>Product <InputSelect @bind-Value="line.ProductId"><option value="@Guid.Empty">Select a product</option>@foreach (var product in AvailableProducts(line)) { <option @key="product.Id" value="@product.Id">@product.Sku — @product.Name</option> }</InputSelect></label>
                         <label>Quantity <InputNumber @bind-Value="line.Quantity" /></label>
                         <button type="button" class="button-danger" disabled="@(_model.Lines.Count == 1)" @onclick="() => RemoveLine(line)">Remove</button>
                     </div>
@@ -51,7 +51,7 @@
     private IEnumerable<LocationDto> DestinationLocations => _locations.Where(x => _model.Type switch { StockMoveType.Receipt or StockMoveType.Transfer => x.Type == LocationType.Internal, StockMoveType.Delivery => x.Type is LocationType.Customer or LocationType.InventoryLoss, StockMoveType.Adjustment => x.Type is LocationType.Internal or LocationType.InventoryLoss, _ => false });
     protected override Task OnInitializedAsync() => Load();
     private async Task Load() { _loading = true; _loadError = null; try { var products = await Http.GetFromJsonAsync<ProductLookupPage>("api/v1/products/?tracksInventory=true&pageSize=100"); _products.Clear(); _products.AddRange(products?.Items.Where(x => !x.IsArchived) ?? []); _locations.Clear(); _locations.AddRange((await Http.GetFromJsonAsync<List<LocationDto>>("api/v1/inventory/locations") ?? []).Where(x => x.IsActive)); } catch (HttpRequestException) { _loadError = "Check your connection and permissions, then try again."; } finally { _loading = false; } }
-    private IEnumerable<ProductLookup> AvailableProducts(BatchLine line) => _products.Where(x => (string.IsNullOrWhiteSpace(_productFilter) || x.Sku.Contains(_productFilter, StringComparison.OrdinalIgnoreCase) || x.Name.Contains(_productFilter, StringComparison.OrdinalIgnoreCase)) && (x.Id == line.ProductId || _model.Lines.All(other => other == line || other.ProductId != x.Id)));
+    private IEnumerable<ProductLookup> AvailableProducts(BatchLine line) => _products.Where(x => (x.Id == line.ProductId || string.IsNullOrWhiteSpace(_productFilter) || x.Sku.Contains(_productFilter, StringComparison.OrdinalIgnoreCase) || x.Name.Contains(_productFilter, StringComparison.OrdinalIgnoreCase)) && (x.Id == line.ProductId || _model.Lines.All(other => other == line || other.ProductId != x.Id)));
     private void AddLine() { if (_model.Lines.Count < 100) _model.Lines.Add(new()); }
     private void RemoveLine(BatchLine line) { if (_model.Lines.Count > 1) _model.Lines.Remove(line); }
     private void StartAnother() { _model = new(); _created = null; _error = null; _productFilter = ""; }
