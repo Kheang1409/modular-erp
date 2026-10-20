@@ -4,6 +4,7 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## 0.1.0 - unreleased
 
+- Exercise Accounting workflows through the real menu links while retaining fresh direct-page accessibility checks; add status-only browser transport diagnostics without changing authentication, rate limits, or assertion timeouts.
 - Made the login accessibility regression wait for interactivity and inspect the live DOM atomically, avoiding false unlabeled-input failures from detached pre-hydration nodes without relaxing label requirements.
 - Preserved original multi-company browser workflow failures when cleanup also fails, and report unsuccessful company-navigation HTTP status before waiting for an interactive page; authentication and rate limits remain unchanged.
 - Extended shared PostgreSQL transactions to all twenty Accounting write methods, including configuration, ledger entries/reversals, invoice/bill posting, payment allocations/reversals, financial controls, audit, and six existing event contracts without changing schema, permissions, or GUID-based number formats.

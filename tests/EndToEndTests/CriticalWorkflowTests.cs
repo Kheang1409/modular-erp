@@ -21,6 +21,14 @@ public sealed partial class CriticalWorkflowTests(ITestOutputHelper output)
         await using var browser = await playwright.Chromium.LaunchAsync(new() { Headless = true });
         var page = await browser.NewPageAsync(new() { ViewportSize = new() { Width = 1440, Height = 1000 } });
         var browserErrors = new List<string>();
+        page.Response += (_, response) =>
+        {
+            if (response.Status < 400) return;
+            var path = new Uri(response.Url).AbsolutePath;
+            var category = path.StartsWith("/_blazor", StringComparison.Ordinal) ? "blazor"
+                : response.Request.ResourceType == "document" ? "document" : "resource";
+            output.WriteLine($"ERP_E2E_HTTP_FAILURE={response.Status} category={category}");
+        };
         page.PageError += (_, error) => browserErrors.Add(error);
         page.Console += (_, message) =>
         {

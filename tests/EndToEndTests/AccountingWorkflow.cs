@@ -95,7 +95,7 @@ internal static class AccountingWorkflow
             (Path: "/accounting/controls", Heading: "Tax and currency controls")
         })
         {
-            await VisitAsync(page, baseUrl, route.Path, route.Heading);
+            await VisitAsync(page, baseUrl, route.Path, route.Heading, direct: true);
             await Assertions.Expect(page.Locator("main table tbody tr").First).ToBeVisibleAsync();
             foreach (var region in await page.Locator("main .table-scroll[role='region']").AllAsync())
             {
@@ -457,10 +457,21 @@ internal static class AccountingWorkflow
         }
         await page.SetViewportSizeAsync(1440, 1000);
     }
-    private static async Task VisitAsync(IPage page, string baseUrl, string path, string heading)
+    private static async Task VisitAsync(IPage page, string baseUrl, string path, string heading, bool direct = false)
     {
-        var response = await page.GotoAsync(Url(baseUrl, path)); Assert.NotNull(response);
-        Assert.True(response.Ok, $"Accounting navigation returned HTTP {response.Status}.");
+        if (direct || new Uri(page.Url).AbsolutePath == path)
+        {
+            var response = await page.GotoAsync(Url(baseUrl, path)); Assert.NotNull(response);
+            Assert.True(response.Ok, $"Accounting navigation returned HTTP {response.Status}.");
+        }
+        else
+        {
+            var link = page.Locator($"#primary-sidebar a[href='{path}']");
+            var group = link.Locator("xpath=ancestor::details[1]");
+            if (await group.GetAttributeAsync("open") is null) await group.Locator("summary").ClickAsync();
+            await link.ClickAsync();
+            await Assertions.Expect(page).ToHaveURLAsync(Url(baseUrl, path));
+        }
         await Assertions.Expect(page.Locator(".shell")).ToHaveAttributeAsync("data-interactive", "true");
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = heading, Level = 1, Exact = true })).ToBeVisibleAsync();
         Assert.Equal(0, await page.Locator(".error-panel, main [role='alert']").CountAsync());

@@ -231,6 +231,13 @@ live inputs remained correctly labeled. The check now waits for interactivity an
 queries and inspects the live DOM in one operation. The same zero-unlabeled-input
 requirement still applies.
 
+A bounded rapid-navigation probe also reproduced a rendered page remaining static
+when Blazor negotiation received HTTP 429. Accounting browser journeys now follow
+the real menu links between screens, while their seven direct-page accessibility
+checks still load fresh pages. Unexpected browser responses report only HTTP status
+and fixed document/Blazor/resource categories, never URLs, payloads, or credentials.
+Authentication, request limits, and assertion timeouts remain unchanged.
+
 ## Fresh installations need their own regression coverage
 
 The readiness gate also exposed a first-run bootstrap bug: startup created a
