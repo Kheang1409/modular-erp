@@ -31,19 +31,20 @@
                         <DataAnnotationsValidator />
                         <ValidationSummary />
                         <div class="content-grid">
-                            <label>Journal <InputSelect @bind-Value="_draft.JournalId">@foreach (var journal in _journals.Where(x => x.IsActive)){<option value="@journal.Id">@journal.Code - @journal.Name</option>}</InputSelect></label>
+                            <label>Journal <InputSelect @bind-Value="_draft.JournalId">@foreach (var journal in _journals.Where(x => x.IsActive)){<option @key="journal.Id" value="@journal.Id">@journal.Code - @journal.Name</option>}</InputSelect></label>
                             <label>Business date <InputDate @bind-Value="_draft.BusinessDate" /></label>
                             <label>Currency <InputText @bind-Value="_draft.CurrencyCode" maxlength="3" /></label>
                             <label>Exchange rate <InputNumber @bind-Value="_draft.ExchangeRate" /></label>
                         </div>
                         <label>Description <InputText @bind-Value="_draft.Description" /></label>
-                        <div class="table-scroll" tabindex="0">
-                            <table><thead><tr><th>Account</th><th>Description</th><th>Debit</th><th>Credit</th></tr></thead><tbody>
-                                @foreach (var line in _draft.Lines)
+                        <div class="table-scroll" tabindex="0" role="region" aria-label="Journal entry lines">
+                            <table><caption>Journal entry lines</caption><thead><tr><th scope="col">Account</th><th scope="col">Description</th><th scope="col">Debit</th><th scope="col">Credit</th></tr></thead><tbody>
+                                @for (var index = 0; index < _draft.Lines.Count; index++)
                                 {
-                                    <tr><td><InputSelect @bind-Value="line.AccountId">@foreach (var account in _accounts.Where(x => x.IsActive && x.AllowDirectPosting)){<option value="@account.Id">@account.Code - @account.Name</option>}</InputSelect></td><td><InputText @bind-Value="line.Description" /></td><td><InputNumber @bind-Value="line.Debit" /></td><td><InputNumber @bind-Value="line.Credit" /></td></tr>
+                                    var line = _draft.Lines[index];
+                                    <tr @key="line"><td><InputSelect @bind-Value="line.AccountId" aria-label="@($"Line {index + 1} account")">@foreach (var account in _accounts.Where(x => x.IsActive && x.AllowDirectPosting)){<option @key="account.Id" value="@account.Id">@account.Code - @account.Name</option>}</InputSelect></td><td><InputText @bind-Value="line.Description" aria-label="@($"Line {index + 1} description")" /></td><td><InputNumber @bind-Value="line.Debit" aria-label="@($"Line {index + 1} debit")" /></td><td><InputNumber @bind-Value="line.Credit" aria-label="@($"Line {index + 1} credit")" /></td></tr>
                                 }
-                            </tbody><tfoot><tr><th colspan="2">Totals</th><th>@_draft.Lines.Sum(x => x.Debit).ToString("N2")</th><th>@_draft.Lines.Sum(x => x.Credit).ToString("N2")</th></tr></tfoot></table>
+                            </tbody><tfoot><tr><th scope="row" colspan="2">Totals</th><td>@_draft.Lines.Sum(x => x.Debit).ToString("N2")</td><td>@_draft.Lines.Sum(x => x.Credit).ToString("N2")</td></tr></tfoot></table>
                         </div>
                         <button type="button" class="button-secondary" @onclick="AddLine">Add line</button>
                         <button disabled="@_saving">Save draft</button>
@@ -60,7 +61,7 @@
         }
         else
         {
-            <div class="table-scroll" tabindex="0"><table><thead><tr><th>Number</th><th>Date</th><th>Description</th><th>Debit</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+            <div class="table-scroll" tabindex="0" role="region" aria-label="Journal entries"><table><caption>Journal entries</caption><thead><tr><th scope="col">Number</th><th scope="col">Date</th><th scope="col">Description</th><th scope="col">Debit</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead><tbody>
                 @foreach (var entry in _entries)
                 {
                     <tr><td>@entry.Number</td><td>@entry.BusinessDate</td><td>@entry.Description</td><td>@entry.Lines.Sum(x => x.Debit).ToString("N2") @entry.CurrencyCode</td><td>@entry.State</td><td><AuthorizeView Policy="@AccountingPermissions.Post" Context="entryAuth">@if(entry.State == JournalEntryState.Draft){<button disabled="@_saving" @onclick="() => Post(entry)">Post</button>}else if(entry.ReversesEntryId is null && entry.ReversedByEntryId is null){<button class="button-secondary" disabled="@_saving" @onclick="() => Reverse(entry)">Reverse</button>}</AuthorizeView></td></tr>

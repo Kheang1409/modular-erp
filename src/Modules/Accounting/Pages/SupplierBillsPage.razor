@@ -4,19 +4,123 @@
 
 <PageTitle>Supplier bills</PageTitle>
 <article class="card contacts-card">
-    <p class="eyebrow">Accounts payable</p><h1>Supplier bills</h1><p>Create a controlled bill snapshot from a confirmed or received purchase order, then post it to payables.</p>
-    @if(_loading){<p role="status">Loading supplier bills...</p>}else if(_error is not null){<div class="notice notice-error" role="alert">@_error <button type="button" @onclick="Load">Try again</button></div>}else{
-        <AuthorizeView Policy="@AccountingPermissions.BillManage" Context="billAuth"><section><h2>Bill a purchase order</h2><EditForm Model="_create" OnValidSubmit="Create" FormName="supplier-bill" Context="billForm"><DataAnnotationsValidator/><ValidationSummary/><div class="content-grid"><label>Purchase order ID <InputText @bind-Value="_create.PurchaseOrderId"/></label><label>Supplier invoice reference <InputText @bind-Value="_create.SupplierReference"/></label><label>Bill date <InputDate @bind-Value="_create.BillDate"/></label><label>Due date <InputDate @bind-Value="_create.DueDate"/></label></div><button disabled="@_saving">Create draft</button></EditForm></section></AuthorizeView>
-        @if(_message is not null){<div class="notice notice-success" role="status">@_message</div>}
-        <h2>Payables</h2>@if(_bills.Count==0){<p>No supplier bills yet.</p>}else{<div class="table-scroll" tabindex="0"><table><thead><tr><th>Bill</th><th>Supplier</th><th>Due</th><th>Total</th><th>Outstanding</th><th>Status</th><th>Actions</th></tr></thead><tbody>@foreach(var bill in _bills){<tr><td>@bill.Number<br/><small>@bill.SupplierReference</small></td><td>@bill.SupplierName</td><td>@bill.DueDate</td><td>@bill.Total.ToString("N2") @bill.CurrencyCode</td><td>@bill.AmountDue.ToString("N2") @bill.CurrencyCode</td><td>@bill.State</td><td>@if(bill.State==SupplierBillState.Draft){<AuthorizeView Policy="@AccountingPermissions.BillPost" Context="postAuth"><button disabled="@_saving" @onclick="()=>Post(bill)">Post</button></AuthorizeView><AuthorizeView Policy="@AccountingPermissions.BillManage" Context="cancelAuth"><button class="button-secondary" disabled="@_saving" @onclick="()=>Cancel(bill)">Cancel</button></AuthorizeView>}</td></tr>}</tbody></table></div>}}
+    <p class="eyebrow">Accounts payable</p>
+    <h1>Supplier bills</h1>
+    <p>Create bills from confirmed purchase orders. Commercial details and totals are copied from the server-side order snapshot.</p>
+    @if (_loading) { <p role="status">Loading supplier bills...</p> }
+    else if (_loadError is not null) { <div class="notice notice-error" role="alert">@_loadError <button type="button" @onclick="Load">Try again</button></div> }
+    else
+    {
+        <AuthorizeView Policy="@AccountingPermissions.BillManage" Context="billAuth">
+            <section>
+                <h2>Bill a purchase order</h2>
+                <EditForm Model="_create" OnValidSubmit="Create" FormName="supplier-bill" Context="billForm">
+                    <DataAnnotationsValidator /><ValidationSummary />
+                    <div class="content-grid">
+                        <label>Purchase order ID <InputText @bind-Value="_create.PurchaseOrderId" /></label>
+                        <label>Supplier invoice reference <InputText @bind-Value="_create.SupplierReference" /></label>
+                        <label>Bill date <InputDate @bind-Value="_create.BillDate" /></label>
+                        <label>Due date <InputDate @bind-Value="_create.DueDate" /></label>
+                    </div>
+                    <button disabled="@_saving">Create draft</button>
+                </EditForm>
+            </section>
+        </AuthorizeView>
+        @if (_selected is not null)
+        {
+            <AuthorizeView Policy="@AccountingPermissions.BillPost" Context="postingAuth">
+                <section aria-labelledby="bill-posting-heading">
+                    <h2 id="bill-posting-heading" tabindex="-1" @ref="_postingHeading">Post bill @_selected.Number</h2>
+                    <p>Choose the accounts explicitly. These choices apply only to this bill.</p>
+                    <EditForm Model="_posting" OnValidSubmit="PostSelected" FormName="post-supplier-bill" Context="postingForm">
+                        <div class="content-grid">
+                            <label>Posting journal <InputSelect @bind-Value="_posting.JournalId"><option value="@Guid.Empty">Select a journal</option>@foreach (var journal in _journals.Where(x => x.IsActive)) { <option @key="journal.Id" value="@journal.Id">@journal.Code - @journal.Name</option> }</InputSelect></label>
+                            <label>Payable account <InputSelect @bind-Value="_posting.PayableAccountId"><option value="@Guid.Empty">Select a payable account</option>@foreach (var account in EligibleAccounts(AccountType.Liability)) { <option @key="account.Id" value="@account.Id">@account.Code - @account.Name</option> }</InputSelect></label>
+                            <label>Expense account <InputSelect @bind-Value="_posting.ExpenseAccountId"><option value="@Guid.Empty">Select an expense account</option>@foreach (var account in EligibleAccounts(AccountType.Expense)) { <option @key="account.Id" value="@account.Id">@account.Code - @account.Name</option> }</InputSelect></label>
+                            <label>Input tax account <InputSelect @bind-Value="_posting.TaxAccountId"><option value="">@(_selected.TaxTotal > 0 ? "Select a recoverable tax account" : "Not required for an untaxed bill")</option>@foreach (var account in EligibleAccounts(AccountType.Asset)) { <option @key="account.Id" value="@account.Id">@account.Code - @account.Name</option> }</InputSelect></label>
+                        </div>
+                        <div class="action-bar"><button disabled="@_saving">Post bill</button><button type="button" class="button-secondary" disabled="@_saving" @onclick="DismissPosting">Cancel posting</button></div>
+                    </EditForm>
+                </section>
+            </AuthorizeView>
+        }
+        @if (_error is not null) { <div class="notice notice-error" role="alert">@_error</div> }
+        @if (_message is not null) { <div class="notice notice-success" role="status">@_message</div> }
+        <h2>Payables</h2>
+        @if (_bills.Count == 0) { <p>No supplier bills yet.</p> }
+        else
+        {
+            <div class="table-scroll" tabindex="0" role="region" aria-label="Payables">
+                <table><caption>Payables</caption>
+                    <thead><tr><th scope="col">Bill</th><th scope="col">Supplier</th><th scope="col">Due</th><th scope="col">Total</th><th scope="col">Outstanding</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
+                    <tbody>@foreach (var bill in _bills)
+                    {
+                        <tr @key="bill.Id"><td>@bill.Number<br /><small>@bill.SupplierReference · @bill.PurchaseOrderNumber</small></td><td>@bill.SupplierName</td><td>@bill.DueDate</td><td>@bill.Total.ToString("N2") @bill.CurrencyCode</td><td>@bill.AmountDue.ToString("N2") @bill.CurrencyCode</td><td>@bill.State</td><td>@if (bill.State == SupplierBillState.Draft)
+                        {
+                            <AuthorizeView Policy="@AccountingPermissions.BillPost" Context="postAuth"><button disabled="@_saving" @onclick="() => SelectForPosting(bill)">Post</button></AuthorizeView>
+                            <AuthorizeView Policy="@AccountingPermissions.BillManage" Context="cancelAuth"><button class="button-secondary" disabled="@_saving" @onclick="() => Cancel(bill)">Cancel</button></AuthorizeView>
+                        }</td></tr>
+                    }</tbody>
+                </table>
+            </div>
+        }
+    }
 </article>
+
 @code {
-    private readonly List<SupplierBillDto> _bills=[];private readonly List<JournalDto> _journals=[];private readonly List<AccountDto> _accounts=[];private CreateForm _create=new();private bool _loading=true,_saving;private string? _error,_message;
-    protected override Task OnInitializedAsync()=>Load();
-    private async Task Load(){_loading=true;_error=null;try{_bills.Clear();_bills.AddRange(await Http.GetFromJsonAsync<List<SupplierBillDto>>("api/v1/accounting/bills")??[]);_journals.Clear();_journals.AddRange(await Http.GetFromJsonAsync<List<JournalDto>>("api/v1/accounting/journals")??[]);_accounts.Clear();_accounts.AddRange(await Http.GetFromJsonAsync<List<AccountDto>>("api/v1/accounting/accounts")??[]);}catch(HttpRequestException){_error="Supplier bills could not be loaded.";}finally{_loading=false;}}
-    private async Task Create(){if(!Guid.TryParse(_create.PurchaseOrderId,out var orderId)){_error="Enter a valid purchase order ID.";return;}await Send(()=>Http.PostAsJsonAsync("api/v1/accounting/bills/from-purchase-order",new CreateSupplierBillRequest(orderId,_create.SupplierReference,_create.BillDate,_create.DueDate,Guid.NewGuid().ToString("N"))),"Supplier bill draft created.");}
-    private async Task Post(SupplierBillDto bill){var journal=_journals.FirstOrDefault(x=>x.IsActive);var payable=_accounts.FirstOrDefault(x=>x.IsActive&&x.AllowDirectPosting&&x.Type==AccountType.Liability);var expense=_accounts.FirstOrDefault(x=>x.IsActive&&x.AllowDirectPosting&&x.Type==AccountType.Expense);var tax=_accounts.FirstOrDefault(x=>x.IsActive&&x.AllowDirectPosting&&x.Type==AccountType.Asset);if(journal is null||payable is null||expense is null||(bill.TaxTotal>0&&tax is null)){_error="Configure an active journal plus direct-posting payable, expense, and recoverable-tax accounts.";return;}await Send(()=>Http.PostAsJsonAsync($"api/v1/accounting/bills/{bill.Id}/post",new PostSupplierBillRequest(journal.Id,payable.Id,expense.Id,tax?.Id,bill.ConcurrencyStamp,Guid.NewGuid().ToString("N"))),$"{bill.Number} posted.");}
-    private Task Cancel(SupplierBillDto bill)=>Send(()=>Http.PostAsJsonAsync($"api/v1/accounting/bills/{bill.Id}/cancel",new AccountingActionRequest(bill.ConcurrencyStamp)),$"{bill.Number} cancelled.");
-    private async Task Send(Func<Task<HttpResponseMessage>> action,string message){_saving=true;_error=null;_message=null;try{var response=await action();if(response.IsSuccessStatusCode){_message=message;await Load();}else _error=await response.Content.ReadAsStringAsync();}catch(HttpRequestException){_error="The server could not be reached.";}finally{_saving=false;}}
-    private sealed class CreateForm{[System.ComponentModel.DataAnnotations.Required]public string PurchaseOrderId{get;set;}="";[System.ComponentModel.DataAnnotations.Required]public string SupplierReference{get;set;}="";public DateOnly BillDate{get;set;}=DateOnly.FromDateTime(DateTime.Today);public DateOnly DueDate{get;set;}=DateOnly.FromDateTime(DateTime.Today.AddDays(30));}
+    private readonly List<SupplierBillDto> _bills = [];
+    private readonly List<JournalDto> _journals = [];
+    private readonly List<AccountDto> _accounts = [];
+    private readonly CreateForm _create = new();
+    private PostingForm _posting = new();
+    private SupplierBillDto? _selected;
+    private bool _loading = true, _saving, _focusPosting;
+    private ElementReference _postingHeading;
+    private string? _loadError, _error, _message;
+    protected override Task OnInitializedAsync() => Load();
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusPosting && _selected is not null) { _focusPosting = false; await _postingHeading.FocusAsync(); }
+    }
+    private async Task Load()
+    {
+        _loading = true; _loadError = null;
+        try
+        {
+            _bills.Clear(); _bills.AddRange(await Http.GetFromJsonAsync<List<SupplierBillDto>>("api/v1/accounting/bills") ?? []);
+            _journals.Clear(); _journals.AddRange(await Http.GetFromJsonAsync<List<JournalDto>>("api/v1/accounting/journals") ?? []);
+            _accounts.Clear(); _accounts.AddRange(await Http.GetFromJsonAsync<List<AccountDto>>("api/v1/accounting/accounts") ?? []);
+        }
+        catch (HttpRequestException) { _loadError = "Supplier bills could not be loaded."; }
+        finally { _loading = false; }
+    }
+    private async Task Create()
+    {
+        if (!Guid.TryParse(_create.PurchaseOrderId, out var orderId)) { _error = "Enter a valid purchase order ID."; return; }
+        await Send(() => Http.PostAsJsonAsync("api/v1/accounting/bills/from-purchase-order", new CreateSupplierBillRequest(orderId, _create.SupplierReference, _create.BillDate, _create.DueDate, Guid.NewGuid().ToString("N"))), "Bill draft created.");
+    }
+    private IEnumerable<AccountDto> EligibleAccounts(AccountType type) => _accounts.Where(x => x.IsActive && x.AllowDirectPosting && x.Type == type);
+    private void SelectForPosting(SupplierBillDto bill) { _selected = bill; _posting = new(); _focusPosting = true; _error = null; _message = null; }
+    private void DismissPosting() { _selected = null; _focusPosting = false; _error = null; }
+    private async Task PostSelected()
+    {
+        if (_selected is not { } bill) return;
+        if (!_journals.Any(x => x.Id == _posting.JournalId && x.IsActive) ||
+            !EligibleAccounts(AccountType.Liability).Any(x => x.Id == _posting.PayableAccountId) ||
+            !EligibleAccounts(AccountType.Expense).Any(x => x.Id == _posting.ExpenseAccountId) ||
+            (bill.TaxTotal > 0 && _posting.TaxAccountId is null) ||
+            (_posting.TaxAccountId is Guid tax && !EligibleAccounts(AccountType.Asset).Any(x => x.Id == tax)))
+        { _error = "Select an active journal, payable and expense accounts, and a recoverable tax account when the bill includes tax."; return; }
+        await Send(() => Http.PostAsJsonAsync($"api/v1/accounting/bills/{bill.Id}/post", new PostSupplierBillRequest(_posting.JournalId, _posting.PayableAccountId, _posting.ExpenseAccountId, _posting.TaxAccountId, bill.ConcurrencyStamp, Guid.NewGuid().ToString("N"))), $"{bill.Number} posted.");
+    }
+    private Task Cancel(SupplierBillDto bill) => Send(() => Http.PostAsJsonAsync($"api/v1/accounting/bills/{bill.Id}/cancel", new AccountingActionRequest(bill.ConcurrencyStamp)), $"{bill.Number} cancelled.");
+    private async Task Send(Func<Task<HttpResponseMessage>> action, string message)
+    {
+        _saving = true; _error = null; _message = null;
+        try { var response = await action(); if (response.IsSuccessStatusCode) { _selected = null; _message = message; await Load(); } else _error = await response.Content.ReadAsStringAsync(); }
+        catch (HttpRequestException) { _error = "The server could not be reached."; }
+        finally { _saving = false; }
+    }
+    private sealed class PostingForm { public Guid JournalId { get; set; } public Guid PayableAccountId { get; set; } public Guid ExpenseAccountId { get; set; } public Guid? TaxAccountId { get; set; } }
+    private sealed class CreateForm { [System.ComponentModel.DataAnnotations.Required] public string PurchaseOrderId { get; set; } = ""; [System.ComponentModel.DataAnnotations.Required] public string SupplierReference { get; set; } = ""; public DateOnly BillDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly DueDate { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(30)); }
 }

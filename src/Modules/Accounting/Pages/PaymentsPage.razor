@@ -4,18 +4,133 @@
 
 <PageTitle>Payments</PageTitle>
 <article class="card contacts-card">
-    <p class="eyebrow">Cash and allocations</p><h1>Payments</h1><p>Record receipts or supplier payments, allocate them without exceeding open balances, and post the resulting cash entry.</p>
-    @if(_loading){<p role="status">Loading payments...</p>}else if(_error is not null){<div class="notice notice-error" role="alert">@_error <button type="button" @onclick="Load">Try again</button></div>}else{
-    <AuthorizeView Policy="@AccountingPermissions.PaymentManage" Context="paymentAuth"><section><h2>New payment</h2><EditForm Model="_form" OnValidSubmit="Create" FormName="payment" Context="paymentForm"><DataAnnotationsValidator/><ValidationSummary/><div class="content-grid"><label>Direction <InputSelect @bind-Value="_form.Direction">@foreach(var value in Enum.GetValues<PaymentDirection>()){<option value="@value">@value</option>}</InputSelect></label><label>Customer or supplier ID <InputText @bind-Value="_form.PartyId"/></label><label>Name <InputText @bind-Value="_form.PartyName"/></label><label>Date <InputDate @bind-Value="_form.PaymentDate"/></label><label>Currency <InputText @bind-Value="_form.CurrencyCode" maxlength="3"/></label><label>Exchange rate <InputNumber @bind-Value="_form.ExchangeRate"/></label><label>Amount <InputNumber @bind-Value="_form.Amount"/></label><label>Reference <InputText @bind-Value="_form.Reference"/></label><label>Invoice or bill ID (optional) <InputText @bind-Value="_form.DocumentId"/></label><label>Allocated amount <InputNumber @bind-Value="_form.AllocatedAmount"/></label></div><button disabled="@_saving">Save draft</button></EditForm></section></AuthorizeView>
-    @if(_message is not null){<div class="notice notice-success" role="status">@_message</div>}
-    <h2>Payment register</h2>@if(_payments.Count==0){<p>No payments recorded.</p>}else{<div class="table-scroll" tabindex="0"><table><thead><tr><th>Number</th><th>Party</th><th>Date</th><th>Amount</th><th>Allocated</th><th>Status</th><th>Actions</th></tr></thead><tbody>@foreach(var payment in _payments){<tr><td>@payment.Number<br/><small>@payment.Reference</small></td><td>@payment.PartyName</td><td>@payment.PaymentDate</td><td>@payment.Amount.ToString("N2") @payment.CurrencyCode</td><td>@payment.AllocatedAmount.ToString("N2")</td><td>@payment.State</td><td><AuthorizeView Policy="@AccountingPermissions.PaymentPost" Context="postAuth">@if(payment.State==PaymentState.Draft){<button disabled="@_saving" @onclick="()=>Post(payment)">Post</button>}else if(payment.State==PaymentState.Posted){<button class="button-secondary" disabled="@_saving" @onclick="()=>Reverse(payment)">Reverse</button>}</AuthorizeView></td></tr>}</tbody></table></div>}}
+    <p class="eyebrow">Cash and allocations</p><h1>Payments</h1>
+    <p>Record receipts or supplier payments, allocate them without exceeding open balances, and post the resulting cash entry.</p>
+    @if (_loading) { <p role="status">Loading payments...</p> }
+    else if (_loadError is not null) { <div class="notice notice-error" role="alert">@_loadError <button type="button" @onclick="Load">Try again</button></div> }
+    else
+    {
+        <AuthorizeView Policy="@AccountingPermissions.PaymentManage" Context="paymentAuth">
+            <section><h2>New payment</h2>
+                <EditForm Model="_form" OnValidSubmit="Create" FormName="payment" Context="paymentForm">
+                    <DataAnnotationsValidator /><ValidationSummary />
+                    <div class="content-grid">
+                        <label>Direction <InputSelect @bind-Value="_form.Direction">@foreach (var value in Enum.GetValues<PaymentDirection>()) { <option @key="value" value="@value">@value</option> }</InputSelect></label>
+                        <label>Customer or supplier ID <InputText @bind-Value="_form.PartyId" /></label>
+                        <label>Name <InputText @bind-Value="_form.PartyName" /></label>
+                        <label>Date <InputDate @bind-Value="_form.PaymentDate" /></label>
+                        <label>Currency <InputText @bind-Value="_form.CurrencyCode" maxlength="3" /></label>
+                        <label>Exchange rate <InputNumber @bind-Value="_form.ExchangeRate" /></label>
+                        <label>Amount <InputNumber @bind-Value="_form.Amount" /></label>
+                        <label>Reference <InputText @bind-Value="_form.Reference" /></label>
+                        <label>Invoice or bill ID (optional) <InputText @bind-Value="_form.DocumentId" /></label>
+                        <label>Allocated amount <InputNumber @bind-Value="_form.AllocatedAmount" /></label>
+                    </div>
+                    <button disabled="@_saving">Save draft</button>
+                </EditForm>
+            </section>
+        </AuthorizeView>
+        @if (_selected is not null)
+        {
+            <AuthorizeView Policy="@AccountingPermissions.PaymentPost" Context="postingAuth">
+                <section aria-labelledby="payment-posting-heading">
+                    <h2 id="payment-posting-heading" tabindex="-1" @ref="_postingHeading">Post payment @_selected.Number</h2>
+                    <p>@_selected.Direction: choose a bank account and a distinct @(_selected.Direction == PaymentDirection.CustomerReceipt ? "receivable" : "payable") account explicitly.</p>
+                    <EditForm Model="_posting" OnValidSubmit="PostSelected" FormName="post-payment" Context="postingForm">
+                        <div class="content-grid">
+                            <label>Posting journal <InputSelect @bind-Value="_posting.JournalId"><option value="@Guid.Empty">Select a journal</option>@foreach (var journal in _journals.Where(x => x.IsActive)) { <option @key="journal.Id" value="@journal.Id">@journal.Code - @journal.Name</option> }</InputSelect></label>
+                            <label>Bank account <InputSelect @bind-Value="_posting.BankAccountId" @bind-Value:after="BankChanged"><option value="@Guid.Empty">Select a bank account</option>@foreach (var account in EligibleAccounts(AccountType.Asset)) { <option @key="account.Id" value="@account.Id">@account.Code - @account.Name</option> }</InputSelect></label>
+                            <label>Control account <InputSelect @bind-Value="_posting.ControlAccountId"><option value="@Guid.Empty">Select a @(_selected.Direction == PaymentDirection.CustomerReceipt ? "receivable" : "payable") account</option>@foreach (var account in EligibleControlAccounts) { <option @key="account.Id" value="@account.Id">@account.Code - @account.Name</option> }</InputSelect></label>
+                        </div>
+                        <div class="action-bar"><button disabled="@_saving">Post payment</button><button type="button" class="button-secondary" disabled="@_saving" @onclick="DismissPosting">Cancel posting</button></div>
+                    </EditForm>
+                </section>
+            </AuthorizeView>
+        }
+        @if (_error is not null) { <div class="notice notice-error" role="alert">@_error</div> }
+        @if (_message is not null) { <div class="notice notice-success" role="status">@_message</div> }
+        <h2>Payment register</h2>
+        @if (_payments.Count == 0) { <p>No payments recorded.</p> }
+        else
+        {
+            <div class="table-scroll" tabindex="0" role="region" aria-label="Payment register">
+                <table><caption>Payment register</caption>
+                    <thead><tr><th scope="col">Number</th><th scope="col">Party</th><th scope="col">Date</th><th scope="col">Amount</th><th scope="col">Allocated</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
+                    <tbody>@foreach (var payment in _payments)
+                    {
+                        <tr @key="payment.Id"><td>@payment.Number<br /><small>@payment.Reference</small></td><td>@payment.PartyName</td><td>@payment.PaymentDate</td><td>@payment.Amount.ToString("N2") @payment.CurrencyCode</td><td>@payment.AllocatedAmount.ToString("N2")</td><td>@payment.State</td><td>
+                            <AuthorizeView Policy="@AccountingPermissions.PaymentPost" Context="postAuth">
+                                @if (payment.State == PaymentState.Draft) { <button disabled="@_saving" @onclick="() => SelectForPosting(payment)">Post</button> }
+                                else if (payment.State == PaymentState.Posted) { <button class="button-secondary" disabled="@_saving" @onclick="() => Reverse(payment)">Reverse</button> }
+                            </AuthorizeView>
+                        </td></tr>
+                    }</tbody>
+                </table>
+            </div>
+        }
+    }
 </article>
+
 @code {
-    private readonly List<PaymentDto> _payments=[];private readonly List<JournalDto> _journals=[];private readonly List<AccountDto> _accounts=[];private PaymentForm _form=new();private bool _loading=true,_saving;private string? _error,_message;
-    protected override Task OnInitializedAsync()=>Load();private async Task Load(){_loading=true;_error=null;try{_payments.Clear();_payments.AddRange(await Http.GetFromJsonAsync<List<PaymentDto>>("api/v1/accounting/payments")??[]);_journals.Clear();_journals.AddRange(await Http.GetFromJsonAsync<List<JournalDto>>("api/v1/accounting/journals")??[]);_accounts.Clear();_accounts.AddRange(await Http.GetFromJsonAsync<List<AccountDto>>("api/v1/accounting/accounts")??[]);}catch(HttpRequestException){_error="Payments could not be loaded.";}finally{_loading=false;}}
-    private async Task Create(){if(!Guid.TryParse(_form.PartyId,out var party)){_error="Enter a valid customer or supplier ID.";return;}var allocations=new List<PaymentAllocationRequest>();if(!string.IsNullOrWhiteSpace(_form.DocumentId)){if(!Guid.TryParse(_form.DocumentId,out var document)){_error="Enter a valid invoice or bill ID.";return;}allocations.Add(new(document,_form.AllocatedAmount));}await Send(()=>Http.PostAsJsonAsync("api/v1/accounting/payments",new CreatePaymentRequest(_form.Direction,party,_form.PartyName,_form.PaymentDate,_form.CurrencyCode,_form.ExchangeRate,_form.Amount,_form.Reference,allocations,Guid.NewGuid().ToString("N"))),"Payment draft created.");}
-    private async Task Post(PaymentDto payment){var journal=_journals.FirstOrDefault(x=>x.IsActive);var bank=_accounts.FirstOrDefault(x=>x.IsActive&&x.AllowDirectPosting&&x.Type==AccountType.Asset);var control=payment.Direction==PaymentDirection.CustomerReceipt?_accounts.FirstOrDefault(x=>x.IsActive&&x.AllowDirectPosting&&x.Type==AccountType.Asset&&x.Id!=bank?.Id):_accounts.FirstOrDefault(x=>x.IsActive&&x.AllowDirectPosting&&x.Type==AccountType.Liability);if(journal is null||bank is null||control is null){_error="Configure an active journal plus distinct direct-posting bank and receivable/payable accounts.";return;}await Send(()=>Http.PostAsJsonAsync($"api/v1/accounting/payments/{payment.Id}/post",new PostPaymentRequest(journal.Id,bank.Id,control.Id,payment.ConcurrencyStamp,Guid.NewGuid().ToString("N"))),$"{payment.Number} posted.");}
-    private Task Reverse(PaymentDto payment)=>Send(()=>Http.PostAsJsonAsync($"api/v1/accounting/payments/{payment.Id}/reverse",new ReversePaymentRequest(DateOnly.FromDateTime(DateTime.Today),Guid.NewGuid().ToString("N"))),$"{payment.Number} reversed.");
-    private async Task Send(Func<Task<HttpResponseMessage>> action,string message){_saving=true;_error=null;_message=null;try{var response=await action();if(response.IsSuccessStatusCode){_message=message;await Load();}else _error=await response.Content.ReadAsStringAsync();}catch(HttpRequestException){_error="The server could not be reached.";}finally{_saving=false;}}
-    private sealed class PaymentForm{public PaymentDirection Direction{get;set;}[System.ComponentModel.DataAnnotations.Required]public string PartyId{get;set;}="";[System.ComponentModel.DataAnnotations.Required]public string PartyName{get;set;}="";public DateOnly PaymentDate{get;set;}=DateOnly.FromDateTime(DateTime.Today);[System.ComponentModel.DataAnnotations.Required]public string CurrencyCode{get;set;}="USD";public decimal ExchangeRate{get;set;}=1;public decimal Amount{get;set;}[System.ComponentModel.DataAnnotations.Required]public string Reference{get;set;}="";public string DocumentId{get;set;}="";public decimal AllocatedAmount{get;set;}}
+    private readonly List<PaymentDto> _payments = [];
+    private readonly List<JournalDto> _journals = [];
+    private readonly List<AccountDto> _accounts = [];
+    private readonly PaymentForm _form = new();
+    private PostingForm _posting = new();
+    private PaymentDto? _selected;
+    private bool _loading = true, _saving, _focusPosting;
+    private ElementReference _postingHeading;
+    private string? _loadError, _error, _message;
+    protected override Task OnInitializedAsync() => Load();
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusPosting && _selected is not null) { _focusPosting = false; await _postingHeading.FocusAsync(); }
+    }
+    private async Task Load()
+    {
+        _loading = true; _loadError = null;
+        try
+        {
+            _payments.Clear(); _payments.AddRange(await Http.GetFromJsonAsync<List<PaymentDto>>("api/v1/accounting/payments") ?? []);
+            _journals.Clear(); _journals.AddRange(await Http.GetFromJsonAsync<List<JournalDto>>("api/v1/accounting/journals") ?? []);
+            _accounts.Clear(); _accounts.AddRange(await Http.GetFromJsonAsync<List<AccountDto>>("api/v1/accounting/accounts") ?? []);
+        }
+        catch (HttpRequestException) { _loadError = "Payments could not be loaded."; }
+        finally { _loading = false; }
+    }
+    private async Task Create()
+    {
+        if (!Guid.TryParse(_form.PartyId, out var party)) { _error = "Enter a valid customer or supplier ID."; return; }
+        var allocations = new List<PaymentAllocationRequest>();
+        if (!string.IsNullOrWhiteSpace(_form.DocumentId))
+        {
+            if (!Guid.TryParse(_form.DocumentId, out var document)) { _error = "Enter a valid invoice or bill ID."; return; }
+            allocations.Add(new(document, _form.AllocatedAmount));
+        }
+        await Send(() => Http.PostAsJsonAsync("api/v1/accounting/payments", new CreatePaymentRequest(_form.Direction, party, _form.PartyName, _form.PaymentDate, _form.CurrencyCode, _form.ExchangeRate, _form.Amount, _form.Reference, allocations, Guid.NewGuid().ToString("N"))), "Payment draft created.");
+    }
+    private IEnumerable<AccountDto> EligibleAccounts(AccountType type) => _accounts.Where(x => x.IsActive && x.AllowDirectPosting && x.Type == type);
+    private IEnumerable<AccountDto> EligibleControlAccounts => EligibleAccounts(_selected?.Direction == PaymentDirection.CustomerReceipt ? AccountType.Asset : AccountType.Liability).Where(x => x.Id != _posting.BankAccountId);
+    private void SelectForPosting(PaymentDto payment) { _selected = payment; _posting = new(); _focusPosting = true; _error = null; _message = null; }
+    private void DismissPosting() { _selected = null; _focusPosting = false; _error = null; }
+    private void BankChanged() { if (!EligibleControlAccounts.Any(x => x.Id == _posting.ControlAccountId)) _posting.ControlAccountId = Guid.Empty; }
+    private async Task PostSelected()
+    {
+        if (_selected is not { } payment) return;
+        if (!_journals.Any(x => x.Id == _posting.JournalId && x.IsActive) ||
+            !EligibleAccounts(AccountType.Asset).Any(x => x.Id == _posting.BankAccountId) ||
+            !EligibleControlAccounts.Any(x => x.Id == _posting.ControlAccountId))
+        { _error = "Select an active journal, bank account, and a distinct receivable or payable account for this payment direction."; return; }
+        await Send(() => Http.PostAsJsonAsync($"api/v1/accounting/payments/{payment.Id}/post", new PostPaymentRequest(_posting.JournalId, _posting.BankAccountId, _posting.ControlAccountId, payment.ConcurrencyStamp, Guid.NewGuid().ToString("N"))), $"{payment.Number} posted.");
+    }
+    private Task Reverse(PaymentDto payment) => Send(() => Http.PostAsJsonAsync($"api/v1/accounting/payments/{payment.Id}/reverse", new ReversePaymentRequest(DateOnly.FromDateTime(DateTime.Today), Guid.NewGuid().ToString("N"))), $"{payment.Number} reversed.");
+    private async Task Send(Func<Task<HttpResponseMessage>> action, string message)
+    {
+        _saving = true; _error = null; _message = null;
+        try { var response = await action(); if (response.IsSuccessStatusCode) { _selected = null; _message = message; await Load(); } else _error = await response.Content.ReadAsStringAsync(); }
+        catch (HttpRequestException) { _error = "The server could not be reached."; }
+        finally { _saving = false; }
+    }
+    private sealed class PostingForm { public Guid JournalId { get; set; } public Guid BankAccountId { get; set; } public Guid ControlAccountId { get; set; } }
+    private sealed class PaymentForm { public PaymentDirection Direction { get; set; } [System.ComponentModel.DataAnnotations.Required] public string PartyId { get; set; } = ""; [System.ComponentModel.DataAnnotations.Required] public string PartyName { get; set; } = ""; public DateOnly PaymentDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); [System.ComponentModel.DataAnnotations.Required] public string CurrencyCode { get; set; } = "USD"; public decimal ExchangeRate { get; set; } = 1; public decimal Amount { get; set; } [System.ComponentModel.DataAnnotations.Required] public string Reference { get; set; } = ""; public string DocumentId { get; set; } = ""; public decimal AllocatedAmount { get; set; } }
 }
