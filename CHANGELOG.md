@@ -4,6 +4,7 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## 0.1.0 - unreleased
 
+- Preserved original multi-company browser workflow failures when cleanup also fails, and report unsuccessful company-navigation HTTP status before waiting for an interactive page; authentication and rate limits remain unchanged.
 - Extended shared PostgreSQL transactions to all twenty Accounting write methods, including configuration, ledger entries/reversals, invoice/bill posting, payment allocations/reversals, financial controls, audit, and six existing event contracts without changing schema, permissions, or GUID-based number formats.
 - Replaced list-order posting-account guesses with explicit journal/account selections for invoices, bills, and payments; added accessible journal-line labels and named keyboard-scrollable Accounting tables.
 - Fixed missing ledger-list reversal links being returned as an empty GUID instead of null, restoring the Reverse action for posted entries without altering ledger history.

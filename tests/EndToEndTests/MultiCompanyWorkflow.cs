@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using Deque.AxeCore.Playwright;
 using Microsoft.Playwright;
@@ -15,6 +16,8 @@ internal static class MultiCompanyWorkflow
         var companyCode = $"BROWSER-{suffix}".ToUpperInvariant();
         Guid? createdCompanyId = null;
         Guid? createdUserId = null;
+        Exception? workflowFailure = null;
+        Exception? cleanupFailure = null;
 
         await using var otherSession = await page.Context.Browser!.NewContextAsync();
         var otherPage = await otherSession.NewPageAsync();
@@ -116,20 +119,36 @@ internal static class MultiCompanyWorkflow
             Assert.Equal(401, revoked.Status);
             createdUserId = null;
         }
+        catch (Exception exception)
+        {
+            workflowFailure = exception;
+        }
         finally
         {
-            await SwitchAsync(page, baseUrl, originalId);
-            if (createdUserId is { } userId) await DisableUserAsync(page.Context.APIRequest, baseUrl, userId);
-            if (createdCompanyId is { } companyId)
+            try
             {
-                var company = (await CompaniesAsync(page.Context.APIRequest, baseUrl)).Single(item => item.GetProperty("id").GetGuid() == companyId);
-                var result = await page.Context.APIRequest.PutAsync(Url(baseUrl, $"/api/v1/platform/companies/{companyId}"), new()
+                await SwitchAsync(page, baseUrl, originalId);
+                if (createdUserId is { } userId) await DisableUserAsync(page.Context.APIRequest, baseUrl, userId);
+                if (createdCompanyId is { } companyId)
                 {
-                    DataObject = new { name = company.GetProperty("name").GetString(), code = company.GetProperty("code").GetString(), timeZoneId = company.GetProperty("timeZoneId").GetString(), isActive = false, expectedVersion = company.GetProperty("version").GetString() }
-                });
-                Assert.True(result.Ok, $"Test company deactivation returned {result.Status}.");
+                    var company = (await CompaniesAsync(page.Context.APIRequest, baseUrl)).Single(item => item.GetProperty("id").GetGuid() == companyId);
+                    var result = await page.Context.APIRequest.PutAsync(Url(baseUrl, $"/api/v1/platform/companies/{companyId}"), new()
+                    {
+                        DataObject = new { name = company.GetProperty("name").GetString(), code = company.GetProperty("code").GetString(), timeZoneId = company.GetProperty("timeZoneId").GetString(), isActive = false, expectedVersion = company.GetProperty("version").GetString() }
+                    });
+                    Assert.True(result.Ok, $"Test company deactivation returned {result.Status}.");
+                }
+            }
+            catch (Exception exception)
+            {
+                cleanupFailure = exception;
             }
         }
+
+        if (workflowFailure is not null && cleanupFailure is not null)
+            throw new AggregateException("The company workflow and its cleanup both failed.", workflowFailure, cleanupFailure);
+        if (workflowFailure is not null) ExceptionDispatchInfo.Capture(workflowFailure).Throw();
+        if (cleanupFailure is not null) ExceptionDispatchInfo.Capture(cleanupFailure).Throw();
     }
 
     private static async Task DisableUserAsync(IAPIRequestContext request, string baseUrl, Guid userId)
@@ -147,7 +166,9 @@ internal static class MultiCompanyWorkflow
 
     private static async Task SwitchAsync(IPage page, string baseUrl, Guid companyId)
     {
-        await page.GotoAsync(Url(baseUrl, "/organization"));
+        var response = await page.GotoAsync(Url(baseUrl, "/organization"));
+        Assert.NotNull(response);
+        Assert.True(response.Ok, $"Company navigation returned HTTP {response.Status}.");
         await Assertions.Expect(page.Locator(".shell")).ToHaveAttributeAsync("data-interactive", "true");
         var selector = page.GetByRole(AriaRole.Combobox, new() { Name = "Active company", Exact = true });
         if (!await selector.IsVisibleAsync()) return;

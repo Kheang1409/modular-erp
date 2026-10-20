@@ -219,6 +219,11 @@ without echoing request bodies, credentials, or exception payloads.
 These changes improve failure visibility. They do not turn an unverified hosted
 run into a successful one or hide a failed assertion.
 
+Multi-company browser checks also retain the original workflow exception when
+cleanup fails, rather than replacing it with the cleanup error. Company navigation
+reports unsuccessful HTTP status before waiting for the interactive page. These
+diagnostics do not bypass authentication, raise rate limits, or suppress failures.
+
 ## Fresh installations need their own regression coverage
 
 The readiness gate also exposed a first-run bootstrap bug: startup created a
