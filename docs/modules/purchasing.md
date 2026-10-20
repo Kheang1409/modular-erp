@@ -31,8 +31,9 @@ The three existing event names and payloads, permissions, schema, state rules, a
 historical commercial snapshots are unchanged. Confirmation stages both the order
 confirmation and goods-receipt-request messages; it does not itself create an
 Inventory receipt. Outbox delivery retains its existing semantics, not an
-exactly-once delivery or legal gapless-numbering guarantee. Inventory now also
-enlists its own workflows; Accounting still requires separate transaction adoption.
+exactly-once delivery or legal gapless-numbering guarantee. Inventory and Accounting
+also enlist their own workflows; Accounting reads source-order snapshots through
+public contracts, without making downstream consumer effects atomic with an order.
 
 Purchase-order list and detail tables use named, keyboard-focusable scroll regions
 so wide rows scroll locally on mobile rather than widening the page.

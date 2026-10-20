@@ -36,7 +36,7 @@ and `IBusinessTransactionCoordinator`; a module implements `ITransactionParticip
 using its own DbContext. Modules never access platform entities or another
 module's schema to participate.
 
-Contacts, Products, CRM, Sales, Purchasing, and Inventory have adopted this boundary. Their mutations share
+Contacts, Products, CRM, Sales, Purchasing, Inventory, and Accounting have adopted this boundary. Their mutations share
 one physical connection and transaction with platform audit and any staged
 outbox messages. CRM also covers stages, assignments, activity completion/reopening,
 and lead conversion with both audit entries. Sales includes quotation/order
@@ -47,10 +47,15 @@ Inventory includes warehouse/location changes, movements and batches, completion
 corrections, and reservation creation/release/consumption. Its existing advisory
 locks remain transaction-scoped on the shared connection, and completed ledger
 entries remain immutable. Existing event contracts and isolation levels are unchanged.
+Accounting includes all twenty write methods across configuration, the general
+ledger, customer invoices, supplier bills, payments, and financial controls.
+Payment allocation changes and their posted or reversing entry share the same
+transaction with audit and the six existing Accounting event contracts. Accounting
+retains its date/GUID-based number formats rather than adopting document sequences.
 The coordinator flushes pending
 platform changes before committing. Ordinary Contacts and Products CSV imports
 preserve independent transactions per valid row.
-Other writable modules retain their existing boundaries until explicitly migrated;
+Other platform/extension write services require explicit boundary review/adoption;
 this is not a system-wide atomicity claim.
 
 Nested scopes join the outer transaction. An inner commit marks that scope complete
@@ -80,7 +85,7 @@ The decision identifiers are retained here as a consolidated architecture record
 | ADR-002: PostgreSQL | PostgreSQL is the production persistence provider. Integration tests exercise the actual provider through Testcontainers. |
 | ADR-003: Module contracts | Modules implement `IErpModule` and depend on public abstractions and contracts. Trusted assemblies are composed before building the service provider; hot unloading is excluded. |
 | ADR-004: Shared-database tenancy | Tenant identifiers, centralized query filters, cross-tenant write guards, and company-scoped business records isolate organizations and companies in shared schemas. |
-| ADR-005: Transactional outbox | Enlisted modules persist integration events in the same PostgreSQL transaction as business changes; remaining writable modules still require explicit adoption. Events are dispatched asynchronously through platform contracts. |
+| ADR-005: Transactional outbox | Enlisted modules persist integration events in the same PostgreSQL transaction as business changes; other writable services and future modules still require explicit adoption. Events are dispatched asynchronously through platform contracts. |
 | ADR-006: Blazor | Razor Components provide server-rendered pages and Interactive Server behavior. Module component assemblies participate in host routing. |
 | ADR-007: Accounting immutability | Posted journal entries and lines are immutable; corrections use balanced reversals and retain their audit relationship. |
 
@@ -95,6 +100,6 @@ validation additionally requires matching total debits and credits.
 
 Operational documents are editable only while draft. Posting customer invoices,
 supplier bills, and payments creates the corresponding journal entry in the same
-Accounting database transaction. Payment reversal restores invoice or bill open
+Accounting/platform transaction with audit and outbox. Payment reversal restores invoice or bill open
 balances and creates a compensating entry without editing posted history. See the
 [Accounting guide](../modules/accounting.md).

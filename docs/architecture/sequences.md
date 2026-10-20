@@ -14,3 +14,7 @@ allocator commits its own short transaction; a later caller failure cannot recla
 that allocation. This is not a legal gapless-numbering guarantee. Modules needing
 legally controlled numbering require a dedicated posting-time policy rather than
 reusing this general allocator.
+
+Accounting retains its existing date/GUID-based `JE`, `RV`, `INV`, `BILL`, `PAY`,
+and `REC` formats. Its shared transaction adoption does not switch those documents
+to this allocator or introduce a posting-time or legal gapless-numbering policy.

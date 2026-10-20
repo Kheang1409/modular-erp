@@ -103,8 +103,8 @@ are explicitly staged as new rows to avoid false edit-concurrency failures.
 
 This changes no schema, permission, event payload, or state-transition rule. A
 receipt-request message is not a completed Inventory receipt, and it does not make
-downstream consumer effects atomic with the purchase order. Inventory adoption is
-described below; Accounting remains separate work. The existing outbox delivery semantics and numbering
+downstream consumer effects atomic with the purchase order. Inventory and Accounting
+adoption are described below. The existing outbox delivery semantics and numbering
 caveats still apply.
 
 Purchase-order lists and details also use named, keyboard-accessible scroll regions
@@ -136,7 +136,7 @@ false concurrency error when an accepted key contains surrounding whitespace.
 All nine existing Inventory event contracts, quantity/location rules, permissions,
 and schema stay unchanged. Fulfillment messages do not introduce a new consumer
 that automatically changes Sales or Purchasing document state. The at-least-once
-delivery and numbering caveats still apply; Accounting remains a separate adoption.
+delivery and numbering caveats still apply; Accounting adoption is described next.
 Populated movement, balance, reservation, warehouse, and location tables now use the same named,
 keyboard-accessible mobile scrolling pattern as Sales and Purchasing.
 Correction navigation also resets the detail page's busy state so the newly
@@ -147,6 +147,41 @@ warehouse filters now use native input binding, with typed-filter browser checks
 guarding the affected screens.
 Selected products and locations remain visible while filtering, preventing a
 placeholder from hiding a still-bound value that would otherwise be submitted.
+
+## Accounting: a posting and its evidence must agree
+
+Accounting now adopts the same explicit boundary for all twenty write methods.
+Account, period, and journal configuration, ledger drafts/posting/reversals,
+invoices, bills, payments and allocations, tax codes, exchange rates, and bank
+reconciliations commit with their audit records and applicable existing events.
+
+The important correction is where commit happens. Invoice/bill and payment
+posting previously committed their Accounting transaction before saving platform
+audit and outbox records. The boundary now begins before reads or staged changes
+and commits only after the operation's evidence is persisted. A failed audit flush,
+partial event staging, cancellation, or late allocation validation cannot leave a
+posted entry or changed paid balance behind. Successful no-op/replay paths also
+complete their nested scope without undoing a caller's outer transaction.
+
+This is not a rewrite of the accounting model. Posted journal entries and lines
+remain immutable, reversals remain compensating entries, source orders stay behind
+public contracts, and money rounding, currency snapshots, permissions, existing
+key/state rules, and all six event contracts are retained. Accounting's existing
+date/GUID numbers are not silently converted to sequences or a legal gapless policy.
+Read Committed and optimistic concurrency remain in place; this is not a new
+serialization guarantee between posting and simultaneous period closure, nor a
+promise that all concurrent duplicate-key requests succeed as replays.
+
+The UI review found another practical problem: invoice and receipt screens inferred
+account roles from list order, which could settle a different receivable account.
+Posting now requires explicit journal/account selections. Users can review bank,
+receivable/payable, revenue/expense, and applicable tax choices before submitting.
+Journal-line controls have accessible labels, and populated Accounting tables use
+named keyboard-focusable scroll regions for desktop and phone-sized layouts.
+The browser workflow also exposed a list/detail mismatch: an unreversed entry's
+list row used an empty GUID where the individual endpoint returned null, hiding
+the Reverse action. The list now returns the same nullable link without modifying
+posted history.
 
 ## Verification should be real, not a passing no-op
 
@@ -218,8 +253,8 @@ successful save; rendered headings and persisted-state assertions remain in plac
 
 ## What remains before a production release
 
-The next steps are adopting the transaction boundary in the remaining writable
-modules, measuring performance with realistic data volumes, completing security
+The next steps are reviewing any remaining platform/extension write boundaries,
+measuring reporting and performance with realistic data volumes, completing security
 and recovery verification, and strengthening module-upgrade failure recovery.
 A complete green CI run and reviewed release notes and version tag remain release
 gates. Production deployments also need their own HTTPS, secret management,

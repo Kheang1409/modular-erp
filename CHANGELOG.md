@@ -4,6 +4,10 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## 0.1.0 - unreleased
 
+- Extended shared PostgreSQL transactions to all twenty Accounting write methods, including configuration, ledger entries/reversals, invoice/bill posting, payment allocations/reversals, financial controls, audit, and six existing event contracts without changing schema, permissions, or GUID-based number formats.
+- Replaced list-order posting-account guesses with explicit journal/account selections for invoices, bills, and payments; added accessible journal-line labels and named keyboard-scrollable Accounting tables.
+- Fixed missing ledger-list reversal links being returned as an empty GUID instead of null, restoring the Reverse action for posted entries without altering ledger history.
+- Added real-PostgreSQL Accounting failure/retry, cancellation, event, concurrency, isolation, immutable-ledger, and outer-transaction regressions plus authenticated financial lifecycle and responsive accessibility checks.
 - Extended the shared PostgreSQL transaction boundary to Inventory configuration, movements/batches, completion/corrections, and reservation lifecycle writes, including numbering, audit, and all nine existing event contracts while retaining advisory locks and immutable completed ledger entries.
 - Rechecked reservation release after acquiring its stock lock to prevent a stale competing release from overwriting the winner or adding duplicate release evidence; same-key replays retain their existing result.
 - Normalized completion replay keys consistently with their persisted values, preventing false concurrency errors for accepted keys with surrounding whitespace.

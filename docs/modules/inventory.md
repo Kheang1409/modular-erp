@@ -44,7 +44,8 @@ permissions, schema, quantity rules, and location matrix are unchanged. Fulfillm
 messages report movement progress; this change does not introduce an automatic
 Sales/Purchasing state-update consumer. Outbox delivery remains at least once and
 does not make consumer effects atomic with the ledger or guarantee legal gapless
-numbering. Accounting remains separate transaction-adoption work.
+numbering. Accounting also enlists its own workflows; this does not create a new
+automatic stock-costing or Inventory-to-ledger posting integration.
 
 Movement, balance, reservation, warehouse, and location tables use named keyboard-focusable scroll
 regions to keep populated wide tables contained on mobile. Navigating from a
