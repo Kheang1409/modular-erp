@@ -224,6 +224,13 @@ cleanup fails, rather than replacing it with the cleanup error. Company navigati
 reports unsuccessful HTTP status before waiting for the interactive page. These
 diagnostics do not bypass authentication, raise rate limits, or suppress failures.
 
+A Linux warm-run check exposed a separate accessibility-test race: Blazor hydration
+replaced login inputs after Playwright selected them but before it inspected their
+labels. Retained-node probes confirmed that the old nodes were detached while the
+live inputs remained correctly labeled. The check now waits for interactivity and
+queries and inspects the live DOM in one operation. The same zero-unlabeled-input
+requirement still applies.
+
 ## Fresh installations need their own regression coverage
 
 The readiness gate also exposed a first-run bootstrap bug: startup created a

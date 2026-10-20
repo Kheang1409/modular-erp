@@ -28,7 +28,8 @@ public sealed partial class CriticalWorkflowTests(ITestOutputHelper output)
         };
         output.WriteLine("ERP_E2E_PHASE=login-navigation");
         await page.GotoAsync(new Uri(new Uri(baseUrl), "/account/login").ToString());
-        Assert.Equal(0, await page.Locator("input:not([type='hidden'])").EvaluateAllAsync<int>("elements => elements.filter(element => !element.labels?.length && !element.getAttribute('aria-label') && !element.getAttribute('aria-labelledby')).length"));
+        await Assertions.Expect(page.Locator(".shell")).ToHaveAttributeAsync("data-interactive", "true");
+        Assert.Equal(0, await page.EvaluateAsync<int>("""() => Array.from(document.querySelectorAll("input:not([type='hidden'])")).filter(element => !element.labels?.length && !element.getAttribute('aria-label') && !element.getAttribute('aria-labelledby')).length"""));
         output.WriteLine("ERP_E2E_PHASE=antiforgery-token");
         var antiforgeryToken = await page.Locator("input[name='__RequestVerificationToken']").InputValueAsync();
         var loginForm = page.Context.APIRequest.CreateFormData();
