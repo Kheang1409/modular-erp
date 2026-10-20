@@ -2,11 +2,20 @@ using Erp.Abstractions.Modules;
 using Erp.Abstractions.Events;
 using Erp.Modules.Accounting;
 using Erp.ModuleSystem;
+using Microsoft.EntityFrameworkCore;
 
 namespace Erp.UnitTests;
 
 public sealed class AccountingModuleTests
 {
+    [Fact]
+    public void AccountingModelMatchesMigrationsSnapshot()
+    {
+        using var database = new AccountingDbContext(new DbContextOptionsBuilder<AccountingDbContext>()
+            .UseNpgsql("Host=localhost;Database=model_only;Username=erp").Options);
+        Assert.False(database.Database.HasPendingModelChanges());
+    }
+
     [Fact]
     public void ManifestAndPermissionsDescribeAccountingBoundary()
     {

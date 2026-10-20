@@ -2,6 +2,7 @@ using System.Text.Json;
 using Erp.Abstractions.Auditing;
 using Erp.Abstractions.Context;
 using Erp.Abstractions.Events;
+using Erp.Abstractions.Persistence;
 using Erp.SharedKernel;
 using Microsoft.EntityFrameworkCore;
 
@@ -16,7 +17,8 @@ public interface IPaymentService
     Task<PaymentDto> ReverseAsync(Guid id, ReversePaymentRequest request, CancellationToken cancellationToken);
 }
 
-public sealed class PaymentService(AccountingDbContext db, ITenantContext tenant, ICompanyContext company, IClock clock, IAuditLogWriter audit, IOutboxWriter outbox) : IPaymentService
+public sealed class PaymentService(AccountingDbContext db, ITenantContext tenant, ICompanyContext company, IClock clock,
+    IAuditLogWriter audit, IOutboxWriter outbox, IBusinessTransactionCoordinator transactions) : IPaymentService
 {
     public async Task<IReadOnlyList<PaymentDto>> ListAsync(CancellationToken cancellationToken) => (await db.Payments.AsNoTracking().Include(x => x.Allocations).OrderByDescending(x => x.PaymentDate).ThenByDescending(x => x.CreatedAtUtc).ToListAsync(cancellationToken)).Select(Dto).ToList();
     public async Task<PaymentDto> GetAsync(Guid id, CancellationToken cancellationToken) => Dto(await Find(id, cancellationToken));
@@ -24,7 +26,14 @@ public sealed class PaymentService(AccountingDbContext db, ITenantContext tenant
     public async Task<PaymentDto> CreateAsync(CreatePaymentRequest request, CancellationToken cancellationToken)
     {
         Validate(request); var key = RequiredKey(request.IdempotencyKey);
-        var existing = await db.Payments.Include(x => x.Allocations).SingleOrDefaultAsync(x => x.IdempotencyKey == key, cancellationToken); if (existing is not null) return Dto(existing);
+        await using var transaction = await transactions.BeginAsync(db, cancellationToken);
+        var existing = await db.Payments.Include(x => x.Allocations).SingleOrDefaultAsync(x => x.IdempotencyKey == key, cancellationToken);
+        if (existing is not null)
+        {
+            var replay = Dto(existing);
+            await transaction.CommitAsync(cancellationToken);
+            return replay;
+        }
         var requests = request.Allocations ?? []; var duplicate = requests.GroupBy(x => x.DocumentId).FirstOrDefault(x => x.Count() > 1); if (duplicate is not null) throw Error("allocations", "Each document can be allocated only once per payment.");
         var allocations = new List<(Guid Id, string Number, decimal Open, decimal Amount)>();
         if (request.Direction == PaymentDirection.CustomerReceipt)
@@ -40,12 +49,24 @@ public sealed class PaymentService(AccountingDbContext db, ITenantContext tenant
         if (allocations.Any(x => x.Amount <= 0 || Money(x.Amount) > Money(x.Open)) || Money(allocations.Sum(x => x.Amount)) > Money(request.Amount)) throw Error("allocations", "Allocations must be positive, cannot exceed document balances, and cannot exceed the payment amount.");
         var now = clock.UtcNow; var id = Guid.NewGuid(); var payment = new Payment { Id = id, TenantId = Tenant(), CompanyId = Company(), Number = $"PAY-{now:yyyyMMdd}-{id.ToString("N")[..8].ToUpperInvariant()}", Direction = request.Direction, PartyId = request.PartyId, PartyName = request.PartyName!.Trim(), PaymentDate = request.PaymentDate, CurrencyCode = request.CurrencyCode!.Trim().ToUpperInvariant(), ExchangeRate = request.ExchangeRate, Amount = Money(request.Amount), Reference = request.Reference!.Trim(), State = PaymentState.Draft, IdempotencyKey = key, CreatedAtUtc = now, UpdatedAtUtc = now, ConcurrencyStamp = Stamp() };
         foreach (var item in allocations) payment.Allocations.Add(new PaymentAllocation { Id = Guid.NewGuid(), TenantId = payment.TenantId, CompanyId = payment.CompanyId, PaymentId = id, CustomerInvoiceId = request.Direction == PaymentDirection.CustomerReceipt ? item.Id : null, SupplierBillId = request.Direction == PaymentDirection.SupplierPayment ? item.Id : null, DocumentNumber = item.Number, Amount = Money(item.Amount) });
-        db.Payments.Add(payment); await Save(cancellationToken); await Audit("accounting.payment.created", payment, cancellationToken); return Dto(payment);
+        db.Payments.Add(payment); await Save(cancellationToken); await Audit("accounting.payment.created", payment, cancellationToken);
+        var result = Dto(payment);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     public async Task<PaymentDto> PostAsync(Guid id, PostPaymentRequest request, CancellationToken cancellationToken)
     {
-        var key = RequiredKey(request.IdempotencyKey); var payment = await Find(id, cancellationToken); if (payment.State == PaymentState.Posted && payment.PostingKey == key) return Dto(payment); if (payment.State != PaymentState.Draft) throw Error("state", "Only draft payments can be posted."); Check(payment.ConcurrencyStamp, request.ConcurrencyStamp);
+        var key = RequiredKey(request.IdempotencyKey);
+        await using var transaction = await transactions.BeginAsync(db, cancellationToken);
+        var payment = await Find(id, cancellationToken);
+        if (payment.State == PaymentState.Posted && payment.PostingKey == key)
+        {
+            var replay = Dto(payment);
+            await transaction.CommitAsync(cancellationToken);
+            return replay;
+        }
+        if (payment.State != PaymentState.Draft) throw Error("state", "Only draft payments can be posted."); Check(payment.ConcurrencyStamp, request.ConcurrencyStamp);
         await EnsureOpen(payment.PaymentDate, cancellationToken); var journal = await db.Journals.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.JournalId && x.IsActive, cancellationToken) ?? throw Error("journalId", "An active journal is required.");
         var accounts = await db.Accounts.AsNoTracking().Where(x => x.Id == request.BankAccountId || x.Id == request.ControlAccountId).ToDictionaryAsync(x => x.Id, cancellationToken); if (accounts.Count != 2 || accounts.Values.Any(x => !x.IsActive || !x.AllowDirectPosting)) throw Error("accounts", "Distinct active direct-posting bank and control accounts are required.");
         var invoices = payment.Direction == PaymentDirection.CustomerReceipt ? await db.CustomerInvoices.Where(x => payment.Allocations.Select(a => a.CustomerInvoiceId).Contains(x.Id)).ToDictionaryAsync(x => x.Id, cancellationToken) : [];
@@ -53,15 +74,30 @@ public sealed class PaymentService(AccountingDbContext db, ITenantContext tenant
         ApplyAllocations(payment, invoices, bills, false);
         var now = clock.UtcNow; var entryId = Guid.NewGuid(); var entry = new JournalEntry { Id = entryId, TenantId = payment.TenantId, CompanyId = payment.CompanyId, Number = $"JE-{now:yyyyMMdd}-{entryId.ToString("N")[..8].ToUpperInvariant()}", JournalId = journal.Id, BusinessDate = payment.PaymentDate, Description = $"{payment.Direction} {payment.Number}", CurrencyCode = payment.CurrencyCode, ExchangeRate = payment.ExchangeRate, State = JournalEntryState.Posted, IdempotencyKey = $"payment:{payment.Id}", PostingKey = key, CreatedAtUtc = now, PostedAtUtc = now, ConcurrencyStamp = Stamp() };
         if (payment.Direction == PaymentDirection.CustomerReceipt) { AddLine(entry, 1, accounts[request.BankAccountId], payment.Reference, payment.Amount, 0); AddLine(entry, 2, accounts[request.ControlAccountId], payment.PartyName, 0, payment.Amount); } else { AddLine(entry, 1, accounts[request.ControlAccountId], payment.PartyName, payment.Amount, 0); AddLine(entry, 2, accounts[request.BankAccountId], payment.Reference, 0, payment.Amount); }
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken); db.JournalEntries.Add(entry); payment.JournalEntryId = entry.Id; payment.PostingKey = key; payment.State = PaymentState.Posted; payment.UpdatedAtUtc = now; payment.ConcurrencyStamp = Stamp(); await Save(cancellationToken); await transaction.CommitAsync(cancellationToken); outbox.Add(new PaymentPostedEvent(Guid.NewGuid(), now, payment.Id, payment.Number, payment.Direction, payment.PartyId, payment.CurrencyCode, payment.Amount)); outbox.Add(new JournalEntryPostedEvent(Guid.NewGuid(), now, entry.Id, entry.Number, entry.BusinessDate, entry.CurrencyCode)); await Audit("accounting.payment.posted", payment, cancellationToken); return Dto(payment);
+        db.JournalEntries.Add(entry); payment.JournalEntryId = entry.Id; payment.PostingKey = key; payment.State = PaymentState.Posted; payment.UpdatedAtUtc = now; payment.ConcurrencyStamp = Stamp(); await Save(cancellationToken); outbox.Add(new PaymentPostedEvent(Guid.NewGuid(), now, payment.Id, payment.Number, payment.Direction, payment.PartyId, payment.CurrencyCode, payment.Amount)); outbox.Add(new JournalEntryPostedEvent(Guid.NewGuid(), now, entry.Id, entry.Number, entry.BusinessDate, entry.CurrencyCode)); await Audit("accounting.payment.posted", payment, cancellationToken);
+        var result = Dto(payment);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     public async Task<PaymentDto> ReverseAsync(Guid id, ReversePaymentRequest request, CancellationToken cancellationToken)
     {
-        var key = RequiredKey(request.IdempotencyKey); var payment = await Find(id, cancellationToken); if (payment.State == PaymentState.Reversed && payment.ReversalKey == key) return Dto(payment); if (payment.State != PaymentState.Posted || payment.JournalEntryId is null) throw Error("state", "Only posted payments can be reversed."); await EnsureOpen(request.BusinessDate, cancellationToken);
+        var key = RequiredKey(request.IdempotencyKey);
+        await using var transaction = await transactions.BeginAsync(db, cancellationToken);
+        var payment = await Find(id, cancellationToken);
+        if (payment.State == PaymentState.Reversed && payment.ReversalKey == key)
+        {
+            var replay = Dto(payment);
+            await transaction.CommitAsync(cancellationToken);
+            return replay;
+        }
+        if (payment.State != PaymentState.Posted || payment.JournalEntryId is null) throw Error("state", "Only posted payments can be reversed."); await EnsureOpen(request.BusinessDate, cancellationToken);
         var original = await db.JournalEntries.AsNoTracking().Include(x => x.Lines).SingleAsync(x => x.Id == payment.JournalEntryId, cancellationToken); var invoices = payment.Direction == PaymentDirection.CustomerReceipt ? await db.CustomerInvoices.Where(x => payment.Allocations.Select(a => a.CustomerInvoiceId).Contains(x.Id)).ToDictionaryAsync(x => x.Id, cancellationToken) : []; var bills = payment.Direction == PaymentDirection.SupplierPayment ? await db.SupplierBills.Where(x => payment.Allocations.Select(a => a.SupplierBillId).Contains(x.Id)).ToDictionaryAsync(x => x.Id, cancellationToken) : []; ApplyAllocations(payment, invoices, bills, true);
         var now = clock.UtcNow; var reversalId = Guid.NewGuid(); var reversal = new JournalEntry { Id = reversalId, TenantId = payment.TenantId, CompanyId = payment.CompanyId, Number = $"RV-{now:yyyyMMdd}-{reversalId.ToString("N")[..8].ToUpperInvariant()}", JournalId = original.JournalId, BusinessDate = request.BusinessDate, Description = $"Reversal of payment {payment.Number}", CurrencyCode = original.CurrencyCode, ExchangeRate = original.ExchangeRate, State = JournalEntryState.Posted, IdempotencyKey = $"payment-reversal:{payment.Id}", PostingKey = key, ReversesEntryId = original.Id, CreatedAtUtc = now, PostedAtUtc = now, ConcurrencyStamp = Stamp() }; foreach (var line in original.Lines.OrderBy(x => x.Sequence)) reversal.Lines.Add(new JournalEntryLine { Id = Guid.NewGuid(), TenantId = reversal.TenantId, CompanyId = reversal.CompanyId, JournalEntryId = reversal.Id, Sequence = line.Sequence, AccountId = line.AccountId, AccountCode = line.AccountCode, AccountName = line.AccountName, Description = line.Description, Debit = line.Credit, Credit = line.Debit, BaseDebit = line.BaseCredit, BaseCredit = line.BaseDebit });
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken); db.JournalEntries.Add(reversal); payment.ReversalJournalEntryId = reversal.Id; payment.ReversalKey = key; payment.State = PaymentState.Reversed; payment.UpdatedAtUtc = now; payment.ConcurrencyStamp = Stamp(); await Save(cancellationToken); await transaction.CommitAsync(cancellationToken); outbox.Add(new PaymentReversedEvent(Guid.NewGuid(), now, payment.Id, payment.Number)); outbox.Add(new JournalEntryPostedEvent(Guid.NewGuid(), now, reversal.Id, reversal.Number, reversal.BusinessDate, reversal.CurrencyCode)); await Audit("accounting.payment.reversed", payment, cancellationToken); return Dto(payment);
+        db.JournalEntries.Add(reversal); payment.ReversalJournalEntryId = reversal.Id; payment.ReversalKey = key; payment.State = PaymentState.Reversed; payment.UpdatedAtUtc = now; payment.ConcurrencyStamp = Stamp(); await Save(cancellationToken); outbox.Add(new PaymentReversedEvent(Guid.NewGuid(), now, payment.Id, payment.Number)); outbox.Add(new JournalEntryPostedEvent(Guid.NewGuid(), now, reversal.Id, reversal.Number, reversal.BusinessDate, reversal.CurrencyCode)); await Audit("accounting.payment.reversed", payment, cancellationToken);
+        var result = Dto(payment);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     private static void ApplyAllocations(Payment payment, Dictionary<Guid, CustomerInvoice> invoices, Dictionary<Guid, SupplierBill> bills, bool reverse) { foreach (var allocation in payment.Allocations) { if (allocation.CustomerInvoiceId is { } invoiceId) { if (!invoices.TryGetValue(invoiceId, out var invoice)) throw Error("allocations", "An allocated invoice is no longer available."); invoice.AmountPaid = Money(invoice.AmountPaid + (reverse ? -allocation.Amount : allocation.Amount)); if (invoice.AmountPaid < 0 || invoice.AmountPaid > invoice.Total) throw Error("allocations", "Invoice allocation exceeds its open balance."); invoice.State = invoice.AmountPaid == 0 ? CustomerInvoiceState.Posted : invoice.AmountPaid == invoice.Total ? CustomerInvoiceState.Paid : CustomerInvoiceState.PartiallyPaid; invoice.UpdatedAtUtc = DateTimeOffset.UtcNow; invoice.ConcurrencyStamp = Stamp(); } else if (allocation.SupplierBillId is { } billId) { if (!bills.TryGetValue(billId, out var bill)) throw Error("allocations", "An allocated bill is no longer available."); bill.AmountPaid = Money(bill.AmountPaid + (reverse ? -allocation.Amount : allocation.Amount)); if (bill.AmountPaid < 0 || bill.AmountPaid > bill.Total) throw Error("allocations", "Bill allocation exceeds its open balance."); bill.State = bill.AmountPaid == 0 ? SupplierBillState.Posted : bill.AmountPaid == bill.Total ? SupplierBillState.Paid : SupplierBillState.PartiallyPaid; bill.UpdatedAtUtc = DateTimeOffset.UtcNow; bill.ConcurrencyStamp = Stamp(); } } }

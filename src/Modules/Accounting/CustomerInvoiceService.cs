@@ -2,6 +2,7 @@ using System.Text.Json;
 using Erp.Abstractions.Auditing;
 using Erp.Abstractions.Context;
 using Erp.Abstractions.Events;
+using Erp.Abstractions.Persistence;
 using Erp.Modules.Sales.Contracts;
 using Erp.SharedKernel;
 using Microsoft.EntityFrameworkCore;
@@ -17,7 +18,9 @@ public interface ICustomerInvoiceService
     Task<CustomerInvoiceDto> CancelAsync(Guid id, AccountingActionRequest request, CancellationToken cancellationToken);
 }
 
-public sealed class CustomerInvoiceService(AccountingDbContext db, ISalesOrderDirectory salesOrders, ITenantContext tenant, ICompanyContext company, IClock clock, IAuditLogWriter audit, IOutboxWriter outbox) : ICustomerInvoiceService
+public sealed class CustomerInvoiceService(AccountingDbContext db, ISalesOrderDirectory salesOrders, ITenantContext tenant,
+    ICompanyContext company, IClock clock, IAuditLogWriter audit, IOutboxWriter outbox,
+    IBusinessTransactionCoordinator transactions) : ICustomerInvoiceService
 {
     public async Task<IReadOnlyList<CustomerInvoiceDto>> ListAsync(CancellationToken cancellationToken) =>
         (await db.CustomerInvoices.AsNoTracking().Include(x => x.Lines).OrderByDescending(x => x.InvoiceDate).ThenByDescending(x => x.CreatedAtUtc).ToListAsync(cancellationToken)).Select(Dto).ToList();
@@ -27,8 +30,14 @@ public sealed class CustomerInvoiceService(AccountingDbContext db, ISalesOrderDi
     public async Task<CustomerInvoiceDto> CreateFromSalesOrderAsync(CreateCustomerInvoiceRequest request, CancellationToken cancellationToken)
     {
         var key = RequiredKey(request.IdempotencyKey);
+        await using var transaction = await transactions.BeginAsync(db, cancellationToken);
         var existing = await db.CustomerInvoices.Include(x => x.Lines).SingleOrDefaultAsync(x => x.IdempotencyKey == key || x.SalesOrderId == request.SalesOrderId, cancellationToken);
-        if (existing is not null) return Dto(existing);
+        if (existing is not null)
+        {
+            var replay = Dto(existing);
+            await transaction.CommitAsync(cancellationToken);
+            return replay;
+        }
         if (request.InvoiceDate == default || request.DueDate < request.InvoiceDate) throw Error("dueDate", "Due date must be on or after the invoice date.");
         var order = await salesOrders.FindAsync(request.SalesOrderId, cancellationToken) ?? throw Error("salesOrderId", "Sales order was not found.");
         if (order.State is not ("Confirmed" or "PartiallyFulfilled" or "Fulfilled")) throw Error("salesOrderId", "Only confirmed or fulfilled sales orders can be invoiced.");
@@ -41,16 +50,24 @@ public sealed class CustomerInvoiceService(AccountingDbContext db, ISalesOrderDi
         db.CustomerInvoices.Add(invoice);
         await Save(cancellationToken);
         await Audit("accounting.invoice.created", invoice, cancellationToken);
-        return Dto(invoice);
+        var result = Dto(invoice);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     public async Task<CustomerInvoiceDto> PostAsync(Guid id, PostCustomerInvoiceRequest request, CancellationToken cancellationToken)
     {
         var key = RequiredKey(request.IdempotencyKey);
+        await using var transaction = await transactions.BeginAsync(db, cancellationToken);
         var invoice = await Find(id, cancellationToken);
         if (invoice.State != CustomerInvoiceState.Draft)
         {
-            if (invoice.State is CustomerInvoiceState.Posted or CustomerInvoiceState.PartiallyPaid or CustomerInvoiceState.Paid) return Dto(invoice);
+            if (invoice.State is CustomerInvoiceState.Posted or CustomerInvoiceState.PartiallyPaid or CustomerInvoiceState.Paid)
+            {
+                var replay = Dto(invoice);
+                await transaction.CommitAsync(cancellationToken);
+                return replay;
+            }
             throw Error("state", "Only draft invoices can be posted.");
         }
         Check(invoice.ConcurrencyStamp, request.ConcurrencyStamp);
@@ -69,27 +86,31 @@ public sealed class CustomerInvoiceService(AccountingDbContext db, ISalesOrderDi
         AddLine(entry, 2, accounts[request.RevenueAccountId], $"Revenue for {invoice.Number}", 0, netRevenue);
         if (invoice.TaxTotal > 0) AddLine(entry, 3, accounts[request.TaxPayableAccountId!.Value], $"Tax for {invoice.Number}", 0, invoice.TaxTotal);
         GeneralLedgerService.ValidateBalance(entry.Lines.Select(x => (x.Debit, x.Credit)));
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         db.JournalEntries.Add(entry);
         invoice.JournalEntryId = entry.Id;
         invoice.State = CustomerInvoiceState.Posted;
         invoice.UpdatedAtUtc = now;
         invoice.ConcurrencyStamp = Stamp();
         await Save(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
         outbox.Add(new CustomerInvoicePostedEvent(Guid.NewGuid(), now, invoice.Id, invoice.Number, invoice.CustomerId, invoice.CurrencyCode, invoice.Total));
         outbox.Add(new JournalEntryPostedEvent(Guid.NewGuid(), now, entry.Id, entry.Number, entry.BusinessDate, entry.CurrencyCode));
         await Audit("accounting.invoice.posted", invoice, cancellationToken);
-        return Dto(invoice);
+        var result = Dto(invoice);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     public async Task<CustomerInvoiceDto> CancelAsync(Guid id, AccountingActionRequest request, CancellationToken cancellationToken)
     {
+        await using var transaction = await transactions.BeginAsync(db, cancellationToken);
         var invoice = await Find(id, cancellationToken);
         Check(invoice.ConcurrencyStamp, request.ConcurrencyStamp);
         if (invoice.State != CustomerInvoiceState.Draft) throw Error("state", "Only draft invoices can be cancelled; posted invoices require a credit or reversal.");
         invoice.State = CustomerInvoiceState.Cancelled; invoice.UpdatedAtUtc = clock.UtcNow; invoice.ConcurrencyStamp = Stamp();
-        await Save(cancellationToken); await Audit("accounting.invoice.cancelled", invoice, cancellationToken); return Dto(invoice);
+        await Save(cancellationToken); await Audit("accounting.invoice.cancelled", invoice, cancellationToken);
+        var result = Dto(invoice);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     private static void AddLine(JournalEntry entry, int sequence, Account account, string description, decimal debit, decimal credit) => entry.Lines.Add(new JournalEntryLine { Id = Guid.NewGuid(), TenantId = entry.TenantId, CompanyId = entry.CompanyId, JournalEntryId = entry.Id, Sequence = sequence, AccountId = account.Id, AccountCode = account.Code, AccountName = account.Name, Description = description, Debit = Money(debit), Credit = Money(credit), BaseDebit = Money(debit * entry.ExchangeRate), BaseCredit = Money(credit * entry.ExchangeRate) });

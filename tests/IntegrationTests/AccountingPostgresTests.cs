@@ -1,6 +1,7 @@
 using Erp.Abstractions.Context;
 using Erp.Abstractions.Auditing;
 using Erp.Abstractions.Events;
+using Erp.Infrastructure.Persistence;
 using Erp.Modules.Accounting;
 using Erp.Modules.Accounting.Contracts;
 using Erp.Modules.Purchasing.Contracts;
@@ -11,8 +12,14 @@ using System.Diagnostics;
 
 namespace Erp.IntegrationTests;
 
-public sealed class AccountingPostgresTests
+public sealed class AccountingPostgresTests : IAsyncLifetime
 {
+    private readonly System.Collections.Concurrent.ConcurrentBag<PlatformDbContext> _platformContexts = [];
+    public Task InitializeAsync() => Task.CompletedTask;
+    public async Task DisposeAsync()
+    {
+        while (_platformContexts.TryTake(out var context)) await context.DisposeAsync();
+    }
     [Fact]
     public async Task PostingReceivablesPayablesPaymentsAndReversalsPreserveLedgerInvariants()
     {
@@ -31,6 +38,8 @@ public sealed class AccountingPostgresTests
             var expenseId = Guid.NewGuid();
             var taxRecoverableId = Guid.NewGuid();
             var options = new DbContextOptionsBuilder<AccountingDbContext>().UseNpgsql(connectionString).Options;
+            await using (var platformMigration = new PlatformDbContext(new DbContextOptionsBuilder<PlatformDbContext>().UseNpgsql(connectionString).Options))
+                await platformMigration.Database.MigrateAsync();
             await using (var migration = new AccountingDbContext(options)) await migration.Database.MigrateAsync();
             await using (var seed = Context(options, tenantId, companyId))
             {
@@ -52,7 +61,8 @@ public sealed class AccountingPostgresTests
             var salesOrder = SalesOrder();
             var purchaseOrder = PurchaseOrder();
             await using var db = Context(options, tenantId, companyId);
-            var invoiceService = new CustomerInvoiceService(db, new Sales(salesOrder), new Tenant(tenantId), new Company(companyId), new TestClock(), audit, outbox);
+            var transactions = Transactions(db, tenantId);
+            var invoiceService = new CustomerInvoiceService(db, new Sales(salesOrder), new Tenant(tenantId), new Company(companyId), new TestClock(), audit, outbox, transactions);
             var invoice = await invoiceService.CreateFromSalesOrderAsync(new(salesOrder.Id, new(2026, 6, 1), new(2026, 6, 30), "invoice-create"), default);
             var sameInvoice = await invoiceService.CreateFromSalesOrderAsync(new(salesOrder.Id, new(2026, 6, 1), new(2026, 6, 30), "invoice-create"), default);
             Assert.Equal(invoice.Id, sameInvoice.Id);
@@ -60,12 +70,12 @@ public sealed class AccountingPostgresTests
             Assert.Equal(CustomerInvoiceState.Posted, invoice.State);
             Assert.Equal(110m, invoice.AmountDue);
 
-            var billService = new SupplierBillService(db, new Purchasing(purchaseOrder), new Tenant(tenantId), new Company(companyId), new TestClock(), audit, outbox);
+            var billService = new SupplierBillService(db, new Purchasing(purchaseOrder), new Tenant(tenantId), new Company(companyId), new TestClock(), audit, outbox, transactions);
             var bill = await billService.CreateFromPurchaseOrderAsync(new(purchaseOrder.Id, "SUP-001", new(2026, 6, 2), new(2026, 7, 2), "bill-create"), default);
             bill = await billService.PostAsync(bill.Id, new(journalId, payableId, expenseId, taxRecoverableId, bill.ConcurrencyStamp, "bill-post"), default);
             Assert.Equal(SupplierBillState.Posted, bill.State);
 
-            var payments = new PaymentService(db, new Tenant(tenantId), new Company(companyId), new TestClock(), audit, outbox);
+            var payments = new PaymentService(db, new Tenant(tenantId), new Company(companyId), new TestClock(), audit, outbox, transactions);
             await Assert.ThrowsAsync<AccountingValidationException>(() => payments.CreateAsync(new(PaymentDirection.CustomerReceipt, salesOrder.CustomerId, salesOrder.CustomerName, new(2026, 6, 5), "USD", 1.25m, 111m, "TOO-MUCH", [new(invoice.Id, 111m)], "payment-overallocate"), default));
             var receipt = await payments.CreateAsync(new(PaymentDirection.CustomerReceipt, salesOrder.CustomerId, salesOrder.CustomerName, new(2026, 6, 5), "USD", 1.25m, 60m, "RCPT-001", [new(invoice.Id, 60m)], "payment-receipt"), default);
             receipt = await payments.PostAsync(receipt.Id, new(journalId, bankId, receivableId, receipt.ConcurrencyStamp, "payment-receipt-post"), default);
@@ -81,7 +91,7 @@ public sealed class AccountingPostgresTests
             supplierPayment = await payments.PostAsync(supplierPayment.Id, new(journalId, bankId, payableId, supplierPayment.ConcurrencyStamp, "supplier-payment-post"), default);
             Assert.Equal(SupplierBillState.Paid, (await billService.GetAsync(bill.Id, default)).State);
 
-            var ledger = new GeneralLedgerService(db, new Tenant(tenantId), new Company(companyId), new TestClock(), audit, outbox);
+            var ledger = new GeneralLedgerService(db, new Tenant(tenantId), new Company(companyId), new TestClock(), audit, outbox, transactions);
             await Assert.ThrowsAsync<AccountingValidationException>(() => ledger.CreateAsync(new(journalId, new(2026, 6, 8), "Unbalanced", "USD", 1, [new(bankId, "Debit", 10, 0), new(revenueId, "Credit", 0, 9)]), default));
             var draft = await ledger.CreateAsync(new(journalId, new(2026, 6, 8), "Manual entry", "USD", 1.25m, [new(bankId, "Debit", 20, 0), new(revenueId, "Credit", 0, 20)], "manual-create"), default);
 
@@ -90,7 +100,7 @@ public sealed class AccountingPostgresTests
                 try
                 {
                     await using var concurrentDb = Context(options, tenantId, companyId);
-                    var service = new GeneralLedgerService(concurrentDb, new Tenant(tenantId), new Company(companyId), new TestClock(), new Audit(), new Outbox());
+                    var service = new GeneralLedgerService(concurrentDb, new Tenant(tenantId), new Company(companyId), new TestClock(), new Audit(), new Outbox(), Transactions(concurrentDb, tenantId));
                     return (await service.PostAsync(draft.Id, new(draft.ConcurrencyStamp, "manual-post"), default), null);
                 }
                 catch (Exception exception) { return (null, exception); }
@@ -207,6 +217,13 @@ public sealed class AccountingPostgresTests
         }
     }
 
+    private BusinessTransactionCoordinator Transactions(AccountingDbContext database, Guid tenantId)
+    {
+        var platform = new PlatformDbContext(new DbContextOptionsBuilder<PlatformDbContext>()
+            .UseNpgsql(database.Database.GetDbConnection()).Options, new Tenant(tenantId));
+        _platformContexts.Add(platform);
+        return new BusinessTransactionCoordinator(platform);
+    }
     private static AccountingDbContext Context(DbContextOptions<AccountingDbContext> options, Guid tenantId, Guid companyId) =>
         new(options, new Tenant(tenantId), new Company(companyId));
     private static void AddAccount(AccountingDbContext db, Guid tenantId, Guid companyId, Guid id, string code, string name, AccountType type, NormalBalance normalBalance) =>

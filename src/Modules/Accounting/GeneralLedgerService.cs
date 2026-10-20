@@ -2,6 +2,7 @@ using System.Text.Json;
 using Erp.Abstractions.Auditing;
 using Erp.Abstractions.Context;
 using Erp.Abstractions.Events;
+using Erp.Abstractions.Persistence;
 using Erp.SharedKernel;
 using Microsoft.EntityFrameworkCore;
 
@@ -16,13 +17,14 @@ public interface IGeneralLedgerService
     Task<JournalEntryDto> ReverseAsync(Guid id, ReverseJournalEntryRequest request, CancellationToken cancellationToken);
 }
 
-public sealed class GeneralLedgerService(AccountingDbContext db, ITenantContext tenant, ICompanyContext company, IClock clock, IAuditLogWriter audit, IOutboxWriter outbox) : IGeneralLedgerService
+public sealed class GeneralLedgerService(AccountingDbContext db, ITenantContext tenant, ICompanyContext company, IClock clock,
+    IAuditLogWriter audit, IOutboxWriter outbox, IBusinessTransactionCoordinator transactions) : IGeneralLedgerService
 {
     public async Task<IReadOnlyList<JournalEntryDto>> ListAsync(CancellationToken cancellationToken)
     {
         var entries = await db.JournalEntries.AsNoTracking().Include(x => x.Lines).OrderByDescending(x => x.BusinessDate).ThenByDescending(x => x.CreatedAtUtc).ToListAsync(cancellationToken);
         var reversals = await ReversalMap(cancellationToken);
-        return entries.Select(x => Dto(x, reversals.GetValueOrDefault(x.Id))).ToList();
+        return entries.Select(x => Dto(x, reversals.TryGetValue(x.Id, out var reversalId) ? reversalId : null)).ToList();
     }
 
     public async Task<JournalEntryDto> GetAsync(Guid id, CancellationToken cancellationToken)
@@ -36,10 +38,16 @@ public sealed class GeneralLedgerService(AccountingDbContext db, ITenantContext 
     {
         ValidateRequest(request);
         var key = CleanKey(request.IdempotencyKey);
+        await using var transaction = await transactions.BeginAsync(db, cancellationToken);
         if (key is not null)
         {
             var existing = await db.JournalEntries.Include(x => x.Lines).SingleOrDefaultAsync(x => x.IdempotencyKey == key, cancellationToken);
-            if (existing is not null) return Dto(existing, null);
+            if (existing is not null)
+            {
+                var replay = Dto(existing, null);
+                await transaction.CommitAsync(cancellationToken);
+                return replay;
+            }
         }
 
         var journal = await db.Journals.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.JournalId && x.IsActive, cancellationToken) ?? throw Error("journalId", "An active journal is required.");
@@ -58,20 +66,30 @@ public sealed class GeneralLedgerService(AccountingDbContext db, ITenantContext 
         db.JournalEntries.Add(entry);
         await Save(cancellationToken);
         await Audit("accounting.entry.created", entry, cancellationToken);
-        return Dto(entry, null);
+        var result = Dto(entry, null);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     public async Task<JournalEntryDto> PostAsync(Guid id, PostJournalEntryRequest request, CancellationToken cancellationToken)
     {
         var key = RequiredKey(request.IdempotencyKey);
+        await using var transaction = await transactions.BeginAsync(db, cancellationToken);
         var prior = await db.JournalEntries.Include(x => x.Lines).SingleOrDefaultAsync(x => x.PostingKey == key, cancellationToken);
         if (prior is not null)
         {
             if (prior.Id != id) throw Error("idempotencyKey", "This posting key belongs to another journal entry.");
-            return Dto(prior, null);
+            var replay = Dto(prior, null);
+            await transaction.CommitAsync(cancellationToken);
+            return replay;
         }
         var entry = await Find(id, cancellationToken);
-        if (entry.State == JournalEntryState.Posted) return Dto(entry, null);
+        if (entry.State == JournalEntryState.Posted)
+        {
+            var replay = Dto(entry, null);
+            await transaction.CommitAsync(cancellationToken);
+            return replay;
+        }
         Check(entry.ConcurrencyStamp, request.ConcurrencyStamp);
         await EnsureOpen(entry.BusinessDate, cancellationToken);
         ValidateBalance(entry.Lines.Select(x => (x.Debit, x.Credit)));
@@ -82,17 +100,22 @@ public sealed class GeneralLedgerService(AccountingDbContext db, ITenantContext 
         await Save(cancellationToken);
         outbox.Add(new JournalEntryPostedEvent(Guid.NewGuid(), clock.UtcNow, entry.Id, entry.Number, entry.BusinessDate, entry.CurrencyCode));
         await Audit("accounting.entry.posted", entry, cancellationToken);
-        return Dto(entry, null);
+        var result = Dto(entry, null);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     public async Task<JournalEntryDto> ReverseAsync(Guid id, ReverseJournalEntryRequest request, CancellationToken cancellationToken)
     {
         var key = RequiredKey(request.IdempotencyKey);
+        await using var transaction = await transactions.BeginAsync(db, cancellationToken);
         var prior = await db.JournalEntries.Include(x => x.Lines).SingleOrDefaultAsync(x => x.IdempotencyKey == key, cancellationToken);
         if (prior is not null)
         {
             if (prior.ReversesEntryId != id) throw Error("idempotencyKey", "This reversal key belongs to another journal entry.");
-            return Dto(prior, null);
+            var replay = Dto(prior, null);
+            await transaction.CommitAsync(cancellationToken);
+            return replay;
         }
         var original = await Find(id, cancellationToken);
         if (original.State != JournalEntryState.Posted) throw Error("state", "Only posted entries can be reversed.");
@@ -106,7 +129,9 @@ public sealed class GeneralLedgerService(AccountingDbContext db, ITenantContext 
         await Save(cancellationToken);
         outbox.Add(new JournalEntryPostedEvent(Guid.NewGuid(), clock.UtcNow, reversal.Id, reversal.Number, reversal.BusinessDate, reversal.CurrencyCode));
         await Audit("accounting.entry.reversed", reversal, cancellationToken);
-        return Dto(reversal, null);
+        var result = Dto(reversal, null);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     public static void ValidateBalance(IEnumerable<(decimal Debit, decimal Credit)> lines)

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Erp.Abstractions.Auditing;
 using Erp.Abstractions.Context;
+using Erp.Abstractions.Persistence;
 using Erp.SharedKernel;
 using Microsoft.EntityFrameworkCore;
 
@@ -18,24 +19,33 @@ public interface IFinancialControlsService
     Task<BankReconciliationDto> FinalizeReconciliationAsync(Guid id, AccountingActionRequest request, CancellationToken cancellationToken);
 }
 
-public sealed class FinancialControlsService(AccountingDbContext db, ITenantContext tenant, ICompanyContext company, IClock clock, IAuditLogWriter audit) : IFinancialControlsService
+public sealed class FinancialControlsService(AccountingDbContext db, ITenantContext tenant, ICompanyContext company,
+    IClock clock, IAuditLogWriter audit, IBusinessTransactionCoordinator transactions) : IFinancialControlsService
 {
     public async Task<IReadOnlyList<TaxCodeDto>> TaxCodesAsync(CancellationToken cancellationToken) => (await db.TaxCodes.AsNoTracking().OrderBy(x => x.Code).ToListAsync(cancellationToken)).Select(Dto).ToList();
     public async Task<TaxCodeDto> SaveTaxCodeAsync(Guid? id, TaxCodeRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.Code) || request.Code.Length > 50 || string.IsNullOrWhiteSpace(request.Name) || request.Name.Length > 200) throw Error("code", "Tax code and name are required within their field limits."); if (request.Rate < 0 || request.Rate > 100) throw Error("rate", "Tax rate must be between 0 and 100.");
+        await using var transaction = await transactions.BeginAsync(db, cancellationToken);
         var accountIds = new[] { request.OutputAccountId, request.InputAccountId }.Where(x => x.HasValue).Select(x => x!.Value).Distinct().ToArray(); if (accountIds.Length > 0 && await db.Accounts.AsNoTracking().CountAsync(x => accountIds.Contains(x.Id) && x.IsActive, cancellationToken) != accountIds.Length) throw Error("accounts", "Tax accounts must be active accounts in this company.");
         TaxCode tax; var now = clock.UtcNow;
         if (id is null) { tax = new TaxCode { Id = Guid.NewGuid(), TenantId = Tenant(), CompanyId = Company(), Code = request.Code.Trim().ToUpperInvariant(), Name = request.Name.Trim(), Rate = request.Rate, OutputAccountId = request.OutputAccountId, InputAccountId = request.InputAccountId, IsActive = request.IsActive, CreatedAtUtc = now, UpdatedAtUtc = now, ConcurrencyStamp = Stamp() }; db.TaxCodes.Add(tax); }
         else { tax = await db.TaxCodes.SingleOrDefaultAsync(x => x.Id == id, cancellationToken) ?? throw new KeyNotFoundException(); Check(tax.ConcurrencyStamp, request.ConcurrencyStamp); tax.Code = request.Code.Trim().ToUpperInvariant(); tax.Name = request.Name.Trim(); tax.Rate = request.Rate; tax.OutputAccountId = request.OutputAccountId; tax.InputAccountId = request.InputAccountId; tax.IsActive = request.IsActive; tax.UpdatedAtUtc = now; tax.ConcurrencyStamp = Stamp(); }
-        await Save(cancellationToken); await Audit("accounting.tax-code.saved", nameof(TaxCode), tax.Id, Dto(tax), cancellationToken); return Dto(tax);
+        await Save(cancellationToken); await Audit("accounting.tax-code.saved", nameof(TaxCode), tax.Id, Dto(tax), cancellationToken);
+        var result = Dto(tax);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     public async Task<IReadOnlyList<CurrencyRateDto>> CurrencyRatesAsync(CancellationToken cancellationToken) => (await db.CurrencyRates.AsNoTracking().OrderByDescending(x => x.EffectiveDate).ThenBy(x => x.BaseCurrencyCode).ThenBy(x => x.QuoteCurrencyCode).ToListAsync(cancellationToken)).Select(Dto).ToList();
     public async Task<CurrencyRateDto> AddCurrencyRateAsync(CurrencyRateRequest request, CancellationToken cancellationToken)
     {
         var baseCode = Currency(request.BaseCurrencyCode, "baseCurrencyCode"); var quoteCode = Currency(request.QuoteCurrencyCode, "quoteCurrencyCode"); if (baseCode == quoteCode) throw Error("quoteCurrencyCode", "Base and quote currencies must differ."); if (request.EffectiveDate == default || request.Rate <= 0) throw Error("rate", "Effective date and a positive rate are required.");
-        var rate = new CurrencyRate { Id = Guid.NewGuid(), TenantId = Tenant(), CompanyId = Company(), BaseCurrencyCode = baseCode, QuoteCurrencyCode = quoteCode, EffectiveDate = request.EffectiveDate, Rate = request.Rate, CreatedAtUtc = clock.UtcNow, ConcurrencyStamp = Stamp() }; db.CurrencyRates.Add(rate); await Save(cancellationToken); await Audit("accounting.currency-rate.added", nameof(CurrencyRate), rate.Id, Dto(rate), cancellationToken); return Dto(rate);
+        await using var transaction = await transactions.BeginAsync(db, cancellationToken);
+        var rate = new CurrencyRate { Id = Guid.NewGuid(), TenantId = Tenant(), CompanyId = Company(), BaseCurrencyCode = baseCode, QuoteCurrencyCode = quoteCode, EffectiveDate = request.EffectiveDate, Rate = request.Rate, CreatedAtUtc = clock.UtcNow, ConcurrencyStamp = Stamp() }; db.CurrencyRates.Add(rate); await Save(cancellationToken); await Audit("accounting.currency-rate.added", nameof(CurrencyRate), rate.Id, Dto(rate), cancellationToken);
+        var result = Dto(rate);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
     public async Task<CurrencyRateDto> ResolveCurrencyRateAsync(string baseCurrency, string quoteCurrency, DateOnly effectiveDate, CancellationToken cancellationToken)
     {
@@ -46,15 +56,31 @@ public sealed class FinancialControlsService(AccountingDbContext db, ITenantCont
     public async Task<IReadOnlyList<BankReconciliationDto>> ReconciliationsAsync(CancellationToken cancellationToken) => (await db.BankReconciliations.AsNoTracking().Include(x => x.Lines).OrderByDescending(x => x.StatementDate).ToListAsync(cancellationToken)).Select(Dto).ToList();
     public async Task<BankReconciliationDto> CreateReconciliationAsync(CreateBankReconciliationRequest request, CancellationToken cancellationToken)
     {
-        if (request.StatementDate == default) throw Error("statementDate", "Statement date is required."); var account = await db.Accounts.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.BankAccountId && x.IsActive && x.Type == AccountType.Asset, cancellationToken) ?? throw Error("bankAccountId", "An active asset account is required."); var entryIds = request.JournalEntryIds?.Distinct().ToArray() ?? [];
+        if (request.StatementDate == default) throw Error("statementDate", "Statement date is required.");
+        await using var transaction = await transactions.BeginAsync(db, cancellationToken);
+        var account = await db.Accounts.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.BankAccountId && x.IsActive && x.Type == AccountType.Asset, cancellationToken) ?? throw Error("bankAccountId", "An active asset account is required."); var entryIds = request.JournalEntryIds?.Distinct().ToArray() ?? [];
         var entries = await db.JournalEntries.AsNoTracking().Include(x => x.Lines).Where(x => entryIds.Contains(x.Id) && x.State == JournalEntryState.Posted && x.BusinessDate <= request.StatementDate).ToListAsync(cancellationToken); if (entries.Count != entryIds.Length) throw Error("journalEntryIds", "Every selected entry must be posted on or before the statement date.");
         var now = clock.UtcNow; var id = Guid.NewGuid(); var reconciliation = new BankReconciliation { Id = id, TenantId = Tenant(), CompanyId = Company(), Number = $"REC-{now:yyyyMMdd}-{id.ToString("N")[..8].ToUpperInvariant()}", BankAccountId = account.Id, StatementDate = request.StatementDate, OpeningBalance = Money(request.OpeningBalance), ClosingBalance = Money(request.ClosingBalance), State = BankReconciliationState.Draft, CreatedAtUtc = now, ConcurrencyStamp = Stamp() };
         foreach (var entry in entries) { var amount = Money(entry.Lines.Where(x => x.AccountId == account.Id).Sum(x => x.Debit - x.Credit)); if (amount == 0) throw Error("journalEntryIds", $"Entry {entry.Number} has no movement in the selected bank account."); reconciliation.Lines.Add(new BankReconciliationLine { Id = Guid.NewGuid(), TenantId = reconciliation.TenantId, CompanyId = reconciliation.CompanyId, BankReconciliationId = id, JournalEntryId = entry.Id, JournalEntryNumber = entry.Number, BusinessDate = entry.BusinessDate, Amount = amount }); }
-        db.BankReconciliations.Add(reconciliation); await Save(cancellationToken); await Audit("accounting.reconciliation.created", nameof(BankReconciliation), reconciliation.Id, Dto(reconciliation), cancellationToken); return Dto(reconciliation);
+        db.BankReconciliations.Add(reconciliation); await Save(cancellationToken); await Audit("accounting.reconciliation.created", nameof(BankReconciliation), reconciliation.Id, Dto(reconciliation), cancellationToken);
+        var result = Dto(reconciliation);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
     public async Task<BankReconciliationDto> FinalizeReconciliationAsync(Guid id, AccountingActionRequest request, CancellationToken cancellationToken)
     {
-        var reconciliation = await db.BankReconciliations.Include(x => x.Lines).SingleOrDefaultAsync(x => x.Id == id, cancellationToken) ?? throw new KeyNotFoundException(); Check(reconciliation.ConcurrencyStamp, request.ConcurrencyStamp); if (reconciliation.State == BankReconciliationState.Reconciled) return Dto(reconciliation); if (Difference(reconciliation) != 0) throw Error("difference", "The reconciliation difference must be zero before finalizing."); reconciliation.State = BankReconciliationState.Reconciled; reconciliation.ReconciledAtUtc = clock.UtcNow; reconciliation.ConcurrencyStamp = Stamp(); await Save(cancellationToken); await Audit("accounting.reconciliation.finalized", nameof(BankReconciliation), reconciliation.Id, Dto(reconciliation), cancellationToken); return Dto(reconciliation);
+        await using var transaction = await transactions.BeginAsync(db, cancellationToken);
+        var reconciliation = await db.BankReconciliations.Include(x => x.Lines).SingleOrDefaultAsync(x => x.Id == id, cancellationToken) ?? throw new KeyNotFoundException(); Check(reconciliation.ConcurrencyStamp, request.ConcurrencyStamp);
+        if (reconciliation.State == BankReconciliationState.Reconciled)
+        {
+            var replay = Dto(reconciliation);
+            await transaction.CommitAsync(cancellationToken);
+            return replay;
+        }
+        if (Difference(reconciliation) != 0) throw Error("difference", "The reconciliation difference must be zero before finalizing."); reconciliation.State = BankReconciliationState.Reconciled; reconciliation.ReconciledAtUtc = clock.UtcNow; reconciliation.ConcurrencyStamp = Stamp(); await Save(cancellationToken); await Audit("accounting.reconciliation.finalized", nameof(BankReconciliation), reconciliation.Id, Dto(reconciliation), cancellationToken);
+        var result = Dto(reconciliation);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     private async Task Save(CancellationToken cancellationToken) { try { await db.SaveChangesAsync(cancellationToken); } catch (DbUpdateConcurrencyException) { throw new AccountingConcurrencyException(); } catch (DbUpdateException exception) when (exception.InnerException?.Message.Contains("duplicate", StringComparison.OrdinalIgnoreCase) == true) { throw Error("duplicate", "A record with the same code, date, or matched entry already exists."); } }

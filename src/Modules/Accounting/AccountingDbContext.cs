@@ -1,13 +1,29 @@
 using Erp.Abstractions.Context;
+using Erp.Abstractions.Persistence;
+using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
+using Microsoft.EntityFrameworkCore.Storage;
 #pragma warning disable CA1725
 namespace Erp.Modules.Accounting;
 
-public sealed class AccountingDbContext(DbContextOptions<AccountingDbContext> options, ITenantContext? tenant = null, ICompanyContext? company = null) : DbContext(options)
+public sealed class AccountingDbContext(DbContextOptions<AccountingDbContext> options, ITenantContext? tenant = null, ICompanyContext? company = null) : DbContext(options), ITransactionParticipant
 {
     private Guid TenantId => tenant?.TenantId?.Value ?? Guid.Empty; private Guid CompanyId => company?.CompanyId?.Value ?? Guid.Empty;
     public DbSet<Account> Accounts => Set<Account>(); public DbSet<FiscalPeriod> FiscalPeriods => Set<FiscalPeriod>(); public DbSet<Journal> Journals => Set<Journal>(); public DbSet<JournalEntry> JournalEntries => Set<JournalEntry>(); public DbSet<JournalEntryLine> JournalEntryLines => Set<JournalEntryLine>(); public DbSet<CustomerInvoice> CustomerInvoices => Set<CustomerInvoice>(); public DbSet<CustomerInvoiceLine> CustomerInvoiceLines => Set<CustomerInvoiceLine>(); public DbSet<SupplierBill> SupplierBills => Set<SupplierBill>(); public DbSet<SupplierBillLine> SupplierBillLines => Set<SupplierBillLine>(); public DbSet<Payment> Payments => Set<Payment>(); public DbSet<PaymentAllocation> PaymentAllocations => Set<PaymentAllocation>(); public DbSet<TaxCode> TaxCodes => Set<TaxCode>(); public DbSet<CurrencyRate> CurrencyRates => Set<CurrencyRate>(); public DbSet<BankReconciliation> BankReconciliations => Set<BankReconciliation>(); public DbSet<BankReconciliationLine> BankReconciliationLines => Set<BankReconciliationLine>();
+    DbConnection ITransactionParticipant.Connection => Database.GetDbConnection();
+    bool ITransactionParticipant.HasPendingChanges => ChangeTracker.HasChanges();
+
+    async Task ITransactionParticipant.EnlistAsync(DbTransaction? transaction, CancellationToken cancellationToken)
+    {
+        if (transaction is not null && Database.CurrentTransaction is { } current &&
+            !ReferenceEquals(current.GetDbTransaction(), transaction))
+            throw new InvalidOperationException("An unrelated Accounting transaction is already active.");
+        _ = await Database.UseTransactionAsync(transaction, cancellationToken);
+    }
+
+    void ITransactionParticipant.DiscardChanges() => ChangeTracker.Clear();
+
     protected override void OnModelCreating(ModelBuilder b)
     {
         b.HasDefaultSchema("accounting");

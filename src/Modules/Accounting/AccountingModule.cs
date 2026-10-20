@@ -1,6 +1,7 @@
 using System.Reflection;
 using Erp.Abstractions.Modules;
 using Erp.Abstractions.Events;
+using Erp.Abstractions.Persistence;
 using Erp.Modules.Accounting.Contracts;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
@@ -16,8 +17,9 @@ public sealed class AccountingModule : IErpModule
     public Assembly ComponentAssembly => typeof(AccountingModule).Assembly;
     public void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
-        var connection = configuration.GetConnectionString("Postgres") ?? throw new InvalidOperationException("ConnectionStrings:Postgres is required.");
-        services.AddDbContext<AccountingDbContext>(options => options.UseNpgsql(connection, postgres => postgres.MigrationsHistoryTable("__EFMigrationsHistory", "accounting")));
+        services.AddDbContext<AccountingDbContext>((provider, options) => options.UseNpgsql(
+            provider.GetRequiredService<IRelationalDatabaseSession>().Connection,
+            postgres => postgres.MigrationsHistoryTable("__EFMigrationsHistory", "accounting")));
         services.AddScoped<IAccountingConfigurationService, AccountingConfigurationService>();
         services.AddScoped<IGeneralLedgerService, GeneralLedgerService>();
         services.AddScoped<ICustomerInvoiceService, CustomerInvoiceService>();
