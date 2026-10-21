@@ -47,7 +47,9 @@ Application logs record identifiers, event/job types, attempt counts, correlatio
 
 ## Recovery
 
-- Failed package replacement restores the previous package directory automatically; restart only after validation succeeds.
+- Package replacement keeps a hidden backup until state is saved. A caught pre-commit failure attempts to restore the previous package and preserves recovery data if that attempt fails. A post-commit backup-cleanup failure leaves the new package committed and any remaining hidden backup files for inspection; recursive cleanup may already have removed part of that old backup. See the [module recovery boundary](../modules/module-sdk.md#failure-and-recovery-boundary).
+- Before recovering packages, stop all module writers and application instances using that root. Inspect the visible package, `modules.state.json`, hidden `.id.backup-*` directories, and `.staging` together. Preserve a copy of the evidence; select a reviewed matching package/state pair, validate it with the configured publisher policy, then restart one instance. Do not blindly remove state (missing flags enable packages), restore an arbitrary backup, or treat package rollback as database-migration rollback.
+- Package filesystem changes and web lifecycle audit records commit separately. If the request fails after package commit, inspect actual package/state before retrying. Named-mutex coordination covers cooperating processes using the same normalized root on one host, not multi-host shared storage or physical-path aliases. Process/power failure recovery is not transactional; an abandoned-mutex warning is not a durable recovery gate.
 - A failed module migration stops startup and is not recorded as successful. Repair forward from the database backup and migration evidence; do not promise automatic rollback.
 - Dead-letter records must be inspected for root cause and payload safety before replay. Replay consumers must remain idempotent.
 - Authorized operators can inspect payload-free dead-letter metadata and request audited replay from **Administration → Queue recovery**. The original payload is never rendered in that page.

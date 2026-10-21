@@ -124,9 +124,16 @@ This is a pre-release community preview, not a production-readiness guarantee. C
 Reporting now adds historical-aging, stable multi-page detail, export-streaming,
 and responsive accessibility regressions. These bounded datasets complement the
 existing ledger performance check; they do not certify production-scale capacity.
+Platform currency writes now share their audit transaction and serialize changes
+within each company. Module updates retain the old package until state is saved,
+restore it on recoverable failures, and reject malformed enablement state.
+Cooperating package managers and startup discovery serialize on the same
+normalized root path on one host. Filesystem changes and the web endpoint's audit
+write are still separate commits; this is not crash-safe or multi-host recovery.
+See the [module recovery boundary](docs/modules/module-sdk.md#failure-and-recovery-boundary).
 Next release gates are reviewing remaining platform/extension write boundaries,
 production-volume performance and security checks, production-like restore and
-module-upgrade recovery, a green complete CI run, and reviewed release notes and
+crash/migration recovery, a green complete CI run, and reviewed release notes and
 a version tag. New writable modules must explicitly adopt the shared boundary.
 Advanced inventory costing, lots/serials, and additional ERP modules remain
 separate future extensions.

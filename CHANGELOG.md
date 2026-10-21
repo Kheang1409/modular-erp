@@ -4,6 +4,11 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## 0.1.0 - unreleased
 
+- Coordinated currency configuration, base-currency changes, and exchange-rate creation with platform audit in one PostgreSQL transaction, retaining optimistic concurrency and serializing writes per tenant/company without schema or permission changes.
+- Added real-PostgreSQL currency rollback/retry, cancellation, constraint, audit-content, isolation, outer-transaction, and deterministic row-lock race regressions.
+- Kept module-update backups until enablement state is saved, restored packages on recoverable replacement/state failures, preserved recovery backups and both errors when rollback fails, and kept post-commit backup-cleanup failures from falsely reporting an uncommitted update.
+- Serialized cooperating module managers and startup discovery for the same normalized root on one host, replaced state through unique flushed temporary files, and rejected malformed or case-duplicate enablement state consistently.
+- Added real-filesystem module recovery/contention regressions and documented the separate filesystem/audit commit boundary, physical-path alias limits, and remaining crash/migration recovery work.
 - Reconstructed receivables/payables aging from dated allocations and compensating reversal journals instead of today's paid-balance cache, preserving settled-document history, currency separation, and tenant/company filters without schema or write-policy changes.
 - Added accessible general-ledger and movement-history paging, totals, 25/50/100-row controls, applied-filter/CSV consistency, and named keyboard-scrollable Reporting tables.
 - Stabilized detail ordering for repeated journal accounts and guarded large page offsets against integer overflow while retaining page normalization and existing public contracts.

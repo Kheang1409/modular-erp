@@ -58,6 +58,11 @@ preserve independent transactions per valid row.
 Other platform/extension write services require explicit boundary review/adoption;
 this is not a system-wide atomicity claim.
 
+Platform currency configuration, base-currency changes, and exchange-rate creation
+also enlist their audit writes in this boundary. A tenant/company row lock
+serializes currency mutations until the root transaction ends, including outer
+composition. Other platform services still need individual review.
+
 Nested scopes join the outer transaction. An inner commit marks that scope complete
 without committing PostgreSQL, while an incomplete inner scope makes the root
 rollback-only. A root cannot commit while a child is active. Different connections

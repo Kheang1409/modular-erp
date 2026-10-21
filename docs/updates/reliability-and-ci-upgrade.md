@@ -215,6 +215,39 @@ exercise keyboard-accessible report regions at desktop and phone widths. These
 fixtures strengthen correctness evidence without claiming production-scale load
 certification or weakening the existing ledger performance budget.
 
+## Platform hardening: currency safety and recoverable package updates
+
+The next review moved beyond business modules. Base-currency changes could be
+saved directly before their audit record was appended, so a later audit failure
+left the company changed despite a failed request. Currency configuration,
+base changes, and exchange-rate creation now share the platform transaction.
+They also lock the selected tenant/company row before checking state: concurrent
+base changes and currency deactivation cannot invalidate one another's checks.
+Existing stamps, expected-base checks, permissions, and schemas stay unchanged.
+
+The package updater had a different boundary problem: it removed the old backup
+before saving enablement state. A failed state write could leave replacement
+files installed even though the update reported failure. Backups now survive
+until state is saved. Recoverable failures restore the previous files and state;
+if rollback I/O fails, the backup and both errors remain available for operators.
+An old-backup cleanup failure after commit does not falsely report an uncommitted
+update. Successful updates still enable the module and require a restart.
+
+Malformed enablement state now fails closed consistently, including ambiguous
+case-duplicate keys. Cooperating managers and startup discovery share a root-level
+lease with a bounded acquisition wait on one host; state writes use unique flushed
+temporary files.
+This protects the same normalized configured path, not symlink/junction aliases
+or multi-host shared storage. Trusted module code is still not sandboxed.
+
+Real PostgreSQL regressions cover failure, cancellation, retry, outer composition,
+scope isolation, and competing currency writes. Real-filesystem tests cover
+package/state failures, exact-byte restoration, retained recovery backups, and
+manager/discovery contention. These checks do not turn two storage systems into
+one transaction: web lifecycle audit is written after the filesystem commit and
+can still fail independently. Crash, power-loss, failed recovery I/O, and module
+migration recovery remain operational release work, not automatic guarantees.
+
 ## Verification should be real, not a passing no-op
 
 Integration tests now require disposable PostgreSQL and storage containers. If
@@ -306,7 +339,8 @@ successful save; rendered headings and persisted-state assertions remain in plac
 
 The next steps are reviewing remaining platform/extension write boundaries,
 measuring production-volume performance beyond the bounded reporting fixtures, completing security
-and recovery verification, and strengthening module-upgrade failure recovery.
+and recovery verification, and proving crash/migration recovery beyond caught
+package-operation failures.
 A complete green CI run and reviewed release notes and version tag remain release
 gates. Production deployments also need their own HTTPS, secret management,
 least-privilege access, malware scanner, and full backup/restore rehearsal.
