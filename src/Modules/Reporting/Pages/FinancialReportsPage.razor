@@ -1,7 +1,189 @@
 @page "/reports/financial"
 @attribute [Authorize(Policy = ReportingPermissions.Financial)]
 @inject HttpClient Http
-<PageTitle>Financial reports</PageTitle><article class="card contacts-card report-page"><p class="eyebrow">Reporting</p><h1>Financial statements</h1><p class="report-back-link"><a href="/reports/dashboard">Company dashboard</a> <span aria-hidden="true">/</span> Detailed report</p><p>Posted base-currency amounts using explicit business-date periods.</p><EditForm Model="_filter" OnValidSubmit="Load" FormName="financial-report-filter"><div class="content-grid"><label>From <InputDate @bind-Value="_filter.From"/></label><label>To / as of <InputDate @bind-Value="_filter.To"/></label></div><button disabled="@_loading">Run reports</button></EditForm>
-@if (!_loading && _error is null) { <ReportVisualizations Kind="ReportVisualizationKind.Financial" Profit="_profit" Balance="_balance" /> }
-@if(_loading){<p role="status">Loading financial statements...</p>}else if(_error is not null){<div class="notice notice-error" role="alert">@_error</div>}else{<p><small>Generated @_generated.ToLocalTime().ToString("g")</small></p><AuthorizeView Policy="@ReportingPermissions.Export" Context="exportAuth"><p><a href="@Csv("trial-balance")">Trial balance CSV</a> · <a href="@Csv("profit-and-loss")">P&amp;L CSV</a> · <a href="@Csv("balance-sheet")">Balance sheet CSV</a> · <a href="@Csv("general-ledger")">Stream ledger CSV</a></p></AuthorizeView><h2>Trial balance</h2><p>Debits @_trial.Sum(x=>x.Debit).ToString("N2") · Credits @_trial.Sum(x=>x.Credit).ToString("N2") · Difference @(_trial.Sum(x=>x.Debit-x.Credit)).ToString("N2")</p>@Table(_trial)<h2>Profit and loss</h2>@Table(_profit)<p><strong>Net income: @DashboardCalculations.ProfitAndLoss(_profit).NetIncome.ToString("N2")</strong></p><h2>Balance sheet</h2>@Table(_balance)<h2>General ledger</h2><div class="table-scroll" tabindex="0"><table><thead><tr><th>Date</th><th>Entry</th><th>Account</th><th>Debit</th><th>Credit</th></tr></thead><tbody>@foreach(var x in _ledger){<tr><td>@x.BusinessDate</td><td>@x.EntryNumber</td><td>@x.AccountCode - @x.AccountName</td><td>@x.BaseDebit.ToString("N2")</td><td>@x.BaseCredit.ToString("N2")</td></tr>}</tbody></table></div>}</article>
-@code{private Filter _filter=new();private List<FinancialAccountReportRow> _trial=[],_profit=[],_balance=[];private List<GeneralLedgerReportRow> _ledger=[];private bool _loading=true;private string? _error;private DateTimeOffset _generated;protected override Task OnInitializedAsync()=>Load();private async Task Load(){_loading=true;_error=null;try{var range=$"from={_filter.From:yyyy-MM-dd}&to={_filter.To:yyyy-MM-dd}";var a=await Http.GetFromJsonAsync<ReportEnvelope<List<FinancialAccountReportRow>>>($"api/v1/reports/financial/trial-balance?asOf={_filter.To:yyyy-MM-dd}");var b=await Http.GetFromJsonAsync<ReportEnvelope<List<FinancialAccountReportRow>>>($"api/v1/reports/financial/profit-and-loss?{range}");var c=await Http.GetFromJsonAsync<ReportEnvelope<List<FinancialAccountReportRow>>>($"api/v1/reports/financial/balance-sheet?asOf={_filter.To:yyyy-MM-dd}");var d=await Http.GetFromJsonAsync<ReportEnvelope<GeneralLedgerReportPage>>($"api/v1/reports/financial/general-ledger?{range}&page=1&pageSize=100");_trial=a?.Data??[];_profit=b?.Data??[];_balance=c?.Data??[];_ledger=d?.Data.Items.ToList()??[];_generated=a?.GeneratedAtUtc??DateTimeOffset.UtcNow;}catch(HttpRequestException){_error="Financial reports could not be loaded.";}finally{_loading=false;}}private string Csv(string name)=>name is "trial-balance" or "balance-sheet"?$"api/v1/reports/financial/{name}.csv?asOf={_filter.To:yyyy-MM-dd}":$"api/v1/reports/financial/{name}.csv?from={_filter.From:yyyy-MM-dd}&to={_filter.To:yyyy-MM-dd}";private static Microsoft.AspNetCore.Components.RenderFragment Table(IEnumerable<FinancialAccountReportRow> rows)=>builder=>{var sequence=0;builder.OpenElement(sequence++,"div");builder.AddAttribute(sequence++,"class","table-scroll");builder.AddAttribute(sequence++,"tabindex","0");builder.OpenElement(sequence++,"table");builder.AddMarkupContent(sequence++,"<thead><tr><th>Account</th><th>Type</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>");foreach(var x in rows){builder.OpenElement(sequence++,"tr");builder.AddMarkupContent(sequence++,$"<td>{System.Net.WebUtility.HtmlEncode(x.Code)} - {System.Net.WebUtility.HtmlEncode(x.Name)}</td><td>{System.Net.WebUtility.HtmlEncode(x.Type)}</td><td>{x.Debit:N2}</td><td>{x.Credit:N2}</td><td>{x.Balance:N2}</td>");builder.CloseElement();}builder.AddMarkupContent(sequence++,"</tbody>");builder.CloseElement();builder.CloseElement();};private sealed class Filter{public DateOnly From{get;set;}=new(DateTime.Today.Year,1,1);public DateOnly To{get;set;}=DateOnly.FromDateTime(DateTime.Today);}}
+
+<PageTitle>Financial reports</PageTitle>
+<article class="card contacts-card report-page" aria-busy="@Busy.ToString().ToLowerInvariant()">
+    <p class="eyebrow">Reporting</p>
+    <h1>Financial statements</h1>
+    <p class="report-back-link"><a href="/reports/dashboard">Company dashboard</a> <span aria-hidden="true">/</span> Detailed report</p>
+    <p>Posted base-currency amounts using explicit business-date periods.</p>
+    <EditForm Model="_filter" OnValidSubmit="Load" FormName="financial-report-filter">
+        <div class="content-grid">
+            <label>From <InputDate @bind-Value="_filter.From" /></label>
+            <label>To / as of <InputDate @bind-Value="_filter.To" /></label>
+        </div>
+        <button disabled="@Busy">Run reports</button>
+    </EditForm>
+
+    @if (_loading)
+    {
+        <p role="status">Loading financial statements...</p>
+    }
+    else if (_error is not null)
+    {
+        <div class="notice notice-error" role="alert">@_error</div>
+    }
+    else
+    {
+        <ReportVisualizations Kind="ReportVisualizationKind.Financial" Profit="_profit" Balance="_balance" />
+        <p><small>Generated @_generated.ToLocalTime().ToString("g")</small></p>
+        <AuthorizeView Policy="@ReportingPermissions.Export" Context="exportAuth">
+            <p>
+                <a href="@Csv("trial-balance")">Trial balance CSV</a> &middot;
+                <a href="@Csv("profit-and-loss")">P&amp;L CSV</a> &middot;
+                <a href="@Csv("balance-sheet")">Balance sheet CSV</a> &middot;
+                <a href="@Csv("general-ledger")">Stream ledger CSV</a>
+            </p>
+        </AuthorizeView>
+        <h2>Trial balance</h2>
+        <p>Debits @_trial.Sum(x => x.Debit).ToString("N2") &middot; Credits @_trial.Sum(x => x.Credit).ToString("N2") &middot; Difference @(_trial.Sum(x => x.Debit - x.Credit)).ToString("N2")</p>
+        @AccountTable("Trial balance", _trial)
+        <h2>Profit and loss</h2>
+        @AccountTable("Profit and loss", _profit)
+        <p><strong>Net income: @DashboardCalculations.ProfitAndLoss(_profit).NetIncome.ToString("N2")</strong></p>
+        <h2>Balance sheet</h2>
+        @AccountTable("Balance sheet", _balance)
+        <h2>General ledger</h2>
+        <p>Applied period: @_appliedFrom.ToString("yyyy-MM-dd") to @_appliedTo.ToString("yyyy-MM-dd").</p>
+        @if (_paging)
+        {
+            <p role="status">Loading general ledger page...</p>
+        }
+        @if (_pageError is not null)
+        {
+            <div class="notice notice-error" role="alert">@_pageError</div>
+        }
+        @if (_ledger.Count == 0)
+        {
+            <p>No posted ledger entries in this period.</p>
+        }
+        else
+        {
+            <div class="table-scroll" role="region" aria-label="General ledger table" tabindex="0">
+                <table>
+                    <caption>General ledger</caption>
+                    <thead><tr><th scope="col">Date</th><th scope="col">Entry</th><th scope="col">Account</th><th scope="col">Debit</th><th scope="col">Credit</th></tr></thead>
+                    <tbody>
+                        @foreach (var row in _ledger)
+                        {
+                            <tr><td>@row.BusinessDate</td><td>@row.EntryNumber</td><td>@row.AccountCode - @row.AccountName</td><td>@row.BaseDebit.ToString("N2")</td><td>@row.BaseCredit.ToString("N2")</td></tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        <ReportPagination State="_ledgerPages" Label="General ledger pagination" PageSizeLabel="General ledger rows per page" Busy="Busy" PageChanged="LoadLedgerPage" PageSizeChanged="ChangeLedgerPageSize" />
+    }
+</article>
+
+@code {
+    private readonly Filter _filter = new();
+    private readonly ReportPaginationState _ledgerPages = new();
+    private List<FinancialAccountReportRow> _trial = [], _profit = [], _balance = [];
+    private List<GeneralLedgerReportRow> _ledger = [];
+    private bool _loading, _paging;
+    private string? _error, _pageError;
+    private DateTimeOffset _generated;
+    private DateOnly _appliedFrom, _appliedTo;
+    private bool Busy => _loading || _paging;
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        if (Busy) return;
+        _loading = true;
+        _error = null;
+        _pageError = null;
+        var from = _filter.From;
+        var to = _filter.To;
+        try
+        {
+            if (from > to)
+            {
+                _error = "From date must be on or before To date.";
+                return;
+            }
+            var range = $"from={from:yyyy-MM-dd}&to={to:yyyy-MM-dd}";
+            // Report modules share a scoped connection; keep these reads sequential.
+            var trial = await Http.GetFromJsonAsync<ReportEnvelope<List<FinancialAccountReportRow>>>($"api/v1/reports/financial/trial-balance?asOf={to:yyyy-MM-dd}");
+            var profit = await Http.GetFromJsonAsync<ReportEnvelope<List<FinancialAccountReportRow>>>($"api/v1/reports/financial/profit-and-loss?{range}");
+            var balance = await Http.GetFromJsonAsync<ReportEnvelope<List<FinancialAccountReportRow>>>($"api/v1/reports/financial/balance-sheet?asOf={to:yyyy-MM-dd}");
+            var ledger = await GetLedgerPage(from, to, 1, _ledgerPages.PageSize);
+            _trial = trial?.Data ?? [];
+            _profit = profit?.Data ?? [];
+            _balance = balance?.Data ?? [];
+            SetLedgerPage(ledger);
+            _appliedFrom = from;
+            _appliedTo = to;
+            _generated = trial?.GeneratedAtUtc ?? DateTimeOffset.UtcNow;
+        }
+        catch (HttpRequestException)
+        {
+            _error = "Financial reports could not be loaded.";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private Task LoadLedgerPage(int page) => LoadLedgerPage(page, _ledgerPages.PageSize);
+    private Task ChangeLedgerPageSize(int pageSize) => LoadLedgerPage(1, pageSize);
+
+    private async Task LoadLedgerPage(int page, int pageSize)
+    {
+        if (Busy || page < 1 || page > _ledgerPages.PageCount || !ReportPaginationState.IsSupportedSize(pageSize)) return;
+        _paging = true;
+        _pageError = null;
+        try
+        {
+            var ledger = await GetLedgerPage(_appliedFrom, _appliedTo, page, pageSize);
+            // A changing result set may no longer have the requested page. Reload page one.
+            if (page > ReportPaginationState.LastPage(ledger?.Total ?? 0, pageSize))
+                ledger = await GetLedgerPage(_appliedFrom, _appliedTo, 1, pageSize);
+            SetLedgerPage(ledger);
+        }
+        catch (HttpRequestException)
+        {
+            _pageError = "The general ledger page could not be loaded. The previous page is still shown.";
+        }
+        finally
+        {
+            _paging = false;
+        }
+    }
+
+    private async Task<GeneralLedgerReportPage?> GetLedgerPage(DateOnly from, DateOnly to, int page, int pageSize) =>
+        (await Http.GetFromJsonAsync<ReportEnvelope<GeneralLedgerReportPage>>($"api/v1/reports/financial/general-ledger?from={from:yyyy-MM-dd}&to={to:yyyy-MM-dd}&page={page}&pageSize={pageSize}"))?.Data;
+
+    private void SetLedgerPage(GeneralLedgerReportPage? ledger)
+    {
+        _ledger = ledger?.Items.ToList() ?? [];
+        _ledgerPages.SetPage(ledger?.Page ?? 1, ledger?.Total ?? 0, _ledger.Count, ledger?.PageSize ?? _ledgerPages.PageSize);
+    }
+
+    private string Csv(string name) => name is "trial-balance" or "balance-sheet"
+        ? $"api/v1/reports/financial/{name}.csv?asOf={_appliedTo:yyyy-MM-dd}"
+        : $"api/v1/reports/financial/{name}.csv?from={_appliedFrom:yyyy-MM-dd}&to={_appliedTo:yyyy-MM-dd}";
+
+    private static RenderFragment AccountTable(string title, IEnumerable<FinancialAccountReportRow> rows) => @<div class="table-scroll" role="region" aria-label="@(title + " table")" tabindex="0">
+        <table>
+            <caption>@title</caption>
+            <thead><tr><th scope="col">Account</th><th scope="col">Type</th><th scope="col">Debit</th><th scope="col">Credit</th><th scope="col">Balance</th></tr></thead>
+            <tbody>
+                @foreach (var row in rows)
+                {
+                    <tr><td>@row.Code - @row.Name</td><td>@row.Type</td><td>@row.Debit.ToString("N2")</td><td>@row.Credit.ToString("N2")</td><td>@row.Balance.ToString("N2")</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>;
+
+    private sealed class Filter
+    {
+        public DateOnly From { get; set; } = new(DateTime.Today.Year, 1, 1);
+        public DateOnly To { get; set; } = DateOnly.FromDateTime(DateTime.Today);
+    }
+}

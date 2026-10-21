@@ -1,0 +1,21 @@
+<nav class="d-flex flex-wrap align-items-center gap-3 mt-3" aria-label="@Label">
+    <label for="@_pageSizeId">Rows per page
+        <select id="@_pageSizeId" aria-label="@PageSizeLabel" @bind:get="State.PageSize" @bind:set="ChangePageSize" disabled="@Busy">
+            <option value="25">25</option><option value="50">50</option><option value="100">100</option>
+        </select>
+    </label>
+    <button type="button" disabled="@(Busy || !State.HasPrevious)" @onclick="() => PageChanged.InvokeAsync(State.Page - 1)">Previous</button>
+    <p class="mb-0" role="status" aria-live="polite">Rows @State.FirstRow-@State.LastRow of @State.Total &middot; Page @State.Page of @State.PageCount</p>
+    <button type="button" disabled="@(Busy || !State.HasNext)" @onclick="() => PageChanged.InvokeAsync(State.Page + 1)">Next</button>
+</nav>
+
+@code {
+    [Parameter, EditorRequired] public ReportPaginationState State { get; set; } = new();
+    [Parameter, EditorRequired] public string Label { get; set; } = "Report pagination";
+    [Parameter, EditorRequired] public string PageSizeLabel { get; set; } = "Report rows per page";
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public EventCallback<int> PageChanged { get; set; }
+    [Parameter] public EventCallback<int> PageSizeChanged { get; set; }
+    private readonly string _pageSizeId = $"report-page-size-{Guid.NewGuid():N}";
+    private Task ChangePageSize(int pageSize) => PageSizeChanged.InvokeAsync(pageSize);
+}
