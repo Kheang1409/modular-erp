@@ -7,15 +7,35 @@ namespace Erp.ModuleSystem;
 
 public sealed record ModuleTrustPolicy(bool RequireSignatures, IReadOnlyDictionary<string, string> TrustedPublisherPublicKeys);
 
-public sealed class ModulePackageManager(IModuleManifestParser manifestParser, string rootPath, ModuleTrustPolicy? trustPolicy = null) : IModulePackageManager
+public sealed class ModulePackageManager : IModulePackageManager
 {
-    private const string StateFileName = "modules.state.json";
     private static readonly JsonSerializerOptions StateJsonOptions = new() { WriteIndented = true };
     private static readonly JsonSerializerOptions SignatureJsonOptions = new() { PropertyNameCaseInsensitive = true };
-    private readonly string _root = Path.GetFullPath(rootPath);
+    private readonly IModuleManifestParser _manifestParser;
+    private readonly string _root;
+    private readonly ModuleTrustPolicy? _trustPolicy;
+    private readonly ModulePackageFileOperations _files;
+
+    public ModulePackageManager(IModuleManifestParser manifestParser, string rootPath, ModuleTrustPolicy? trustPolicy = null)
+        : this(manifestParser, rootPath, trustPolicy, new ModulePackageFileOperations())
+    {
+    }
+
+    internal ModulePackageManager(
+        IModuleManifestParser manifestParser,
+        string rootPath,
+        ModuleTrustPolicy? trustPolicy,
+        ModulePackageFileOperations files)
+    {
+        _manifestParser = manifestParser;
+        _root = Path.GetFullPath(rootPath);
+        _trustPolicy = trustPolicy;
+        _files = files;
+    }
 
     public IReadOnlyList<ModulePackageInfo> List()
     {
+        using var lease = ModuleRootSynchronization.Acquire(_root);
         if (!Directory.Exists(_root)) return [];
         var state = ReadState();
         return Directory.GetDirectories(_root)
@@ -27,56 +47,85 @@ public sealed class ModulePackageManager(IModuleManifestParser manifestParser, s
 
     public ModulePackageInfo Validate(string archivePath)
     {
+        using var lease = ModuleRootSynchronization.Acquire(_root);
+        ReadState();
         var staged = StageAndValidate(archivePath);
         try { return staged.Info with { Installed = Directory.Exists(Path.Combine(_root, staged.Info.Id)) }; }
-        finally { Directory.Delete(staged.Path, recursive: true); }
+        finally { _files.DeleteDirectory(staged.Path); }
     }
 
     public ModulePackageInfo Install(string archivePath, bool update = false)
     {
+        using var lease = ModuleRootSynchronization.Acquire(_root);
         Directory.CreateDirectory(_root);
+        var state = ReadState();
         var staged = StageAndValidate(archivePath);
         var destination = Path.Combine(_root, staged.Info.Id);
         EnsureWithin(_root, destination);
         var exists = Directory.Exists(destination);
-        if (exists != update)
-        {
-            Directory.Delete(staged.Path, recursive: true);
-            throw new InvalidOperationException(exists
-                ? $"Module '{staged.Info.Id}' is already installed; use update."
-                : $"Module '{staged.Info.Id}' is not installed; use install.");
-        }
-
         string? backup = null;
+        var promoted = false;
         try
         {
+            if (exists != update)
+                throw new InvalidOperationException(exists
+                    ? $"Module '{staged.Info.Id}' is already installed; use update."
+                    : $"Module '{staged.Info.Id}' is not installed; use install.");
             if (exists)
             {
                 backup = Path.Combine(_root, $".{staged.Info.Id}.backup-{Guid.NewGuid():N}");
-                Directory.Move(destination, backup);
+                _files.MoveDirectory(destination, backup);
             }
-            Directory.Move(staged.Path, destination);
-            if (backup is not null) Directory.Delete(backup, recursive: true);
-            var state = ReadState();
+            _files.MoveDirectory(staged.Path, destination);
+            promoted = true;
             state[staged.Info.Id] = true;
             WriteState(state);
-            return staged.Info with { Enabled = true, Installed = true, RestartRequired = true };
         }
-        catch
+        catch (Exception failure)
         {
-            if (Directory.Exists(staged.Path)) Directory.Delete(staged.Path, recursive: true);
-            if (backup is not null && Directory.Exists(backup) && !Directory.Exists(destination)) Directory.Move(backup, destination);
+            var recoveryFailures = new List<Exception>();
+            if (promoted && Directory.Exists(destination))
+            {
+                try { _files.DeleteDirectory(destination); }
+                catch (Exception exception) { recoveryFailures.Add(exception); }
+            }
+            if (backup is not null && Directory.Exists(backup) && !Directory.Exists(destination))
+            {
+                try { _files.MoveDirectory(backup, destination); }
+                catch (Exception exception) { recoveryFailures.Add(exception); }
+            }
+            if (Directory.Exists(staged.Path))
+            {
+                try { _files.DeleteDirectory(staged.Path); }
+                catch (Exception exception) { recoveryFailures.Add(exception); }
+            }
+            if (recoveryFailures.Count > 0)
+                throw new AggregateException(
+                    "The module operation failed and recovery was incomplete. Inspect the module packages, state, and hidden backups before retrying.",
+                    new[] { failure }.Concat(recoveryFailures));
             throw;
         }
+
+        // State replacement is the commit point. Cleanup cannot turn a committed
+        // package replacement into a failed operation or discard recovery data.
+        if (backup is not null && Directory.Exists(backup))
+        {
+            try { _files.DeleteDirectory(backup); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+        return staged.Info with { Enabled = true, Installed = true, RestartRequired = true };
     }
 
     public ModulePackageInfo SetEnabled(string moduleId, bool enabled)
     {
+        using var lease = ModuleRootSynchronization.Acquire(_root);
         ValidateId(moduleId);
         var path = Path.Combine(_root, moduleId);
         EnsureWithin(_root, path);
         if (!Directory.Exists(path)) throw new KeyNotFoundException($"Module '{moduleId}' is not installed.");
         var state = ReadState();
+        var info = ReadInstalled(path, state);
         var installed = ReadInstalledManifests();
         if (enabled)
         {
@@ -96,15 +145,12 @@ public sealed class ModulePackageManager(IModuleManifestParser manifestParser, s
         }
         state[moduleId] = enabled;
         WriteState(state);
-        var info = ReadInstalled(path, state);
-        return info with { RestartRequired = true };
+        return info with { Enabled = enabled, RestartRequired = true };
     }
 
     internal static IReadOnlySet<string> DisabledModules(string rootPath)
     {
-        var path = Path.Combine(Path.GetFullPath(rootPath), StateFileName);
-        if (!File.Exists(path)) return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var state = JsonSerializer.Deserialize<Dictionary<string, bool>>(File.ReadAllText(path)) ?? [];
+        var state = ModulePackageState.Read(Path.GetFullPath(rootPath));
         return state.Where(item => !item.Value).Select(item => item.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
@@ -138,16 +184,20 @@ public sealed class ModulePackageManager(IModuleManifestParser manifestParser, s
             var manifestPath = Path.Combine(staged, "module.json");
             if (!File.Exists(manifestPath)) throw new InvalidDataException("Module package requires module.json.");
             ModuleManifest manifest;
-            using (var stream = File.OpenRead(manifestPath)) manifest = manifestParser.Parse(stream);
+            using (var stream = File.OpenRead(manifestPath)) manifest = _manifestParser.Parse(stream);
             ValidateId(manifest.Id);
             VerifyPublisherSignature(staged);
-            new ExternalModuleCatalog(manifestParser).LoadSingle(_root, staged);
+            new ExternalModuleCatalog(_manifestParser).LoadSingle(_root, staged);
             var state = ReadState();
             return (staged, new(manifest.Id, manifest.Name, manifest.Version, !state.TryGetValue(manifest.Id, out var enabled) || enabled, false, false));
         }
-        catch
+        catch (Exception failure)
         {
-            Directory.Delete(staged, recursive: true);
+            try { _files.DeleteDirectory(staged); }
+            catch (Exception cleanupFailure)
+            {
+                throw new AggregateException("Module validation failed and its staging directory could not be cleaned up.", failure, cleanupFailure);
+            }
             throw;
         }
     }
@@ -157,15 +207,15 @@ public sealed class ModulePackageManager(IModuleManifestParser manifestParser, s
         var signaturePath = Path.Combine(stagedPath, "module.signature.json");
         if (!File.Exists(signaturePath))
         {
-            if (trustPolicy?.RequireSignatures == true) throw new InvalidDataException("The module trust policy requires a publisher signature.");
+            if (_trustPolicy?.RequireSignatures == true) throw new InvalidDataException("The module trust policy requires a publisher signature.");
             return;
         }
-        if (trustPolicy is null) throw new InvalidDataException("The package is signed, but no publisher trust policy is configured.");
+        if (_trustPolicy is null) throw new InvalidDataException("The package is signed, but no publisher trust policy is configured.");
         var signature = JsonSerializer.Deserialize<PublisherSignature>(File.ReadAllText(signaturePath), SignatureJsonOptions)
             ?? throw new InvalidDataException("module.signature.json is invalid.");
         if (!string.Equals(signature.Algorithm, "ECDSA-SHA256", StringComparison.Ordinal))
             throw new InvalidDataException("Only ECDSA-SHA256 publisher signatures are supported.");
-        if (!trustPolicy.TrustedPublisherPublicKeys.TryGetValue(signature.Publisher, out var publicKey))
+        if (!_trustPolicy.TrustedPublisherPublicKeys.TryGetValue(signature.Publisher, out var publicKey))
             throw new InvalidDataException($"Publisher '{signature.Publisher}' is not trusted.");
         byte[] signatureBytes;
         try { signatureBytes = Convert.FromBase64String(signature.Signature); }
@@ -191,17 +241,11 @@ public sealed class ModulePackageManager(IModuleManifestParser manifestParser, s
     private ModulePackageInfo ReadInstalled(string path, Dictionary<string, bool> state)
     {
         using var stream = File.OpenRead(Path.Combine(path, "module.json"));
-        var manifest = manifestParser.Parse(stream);
+        var manifest = _manifestParser.Parse(stream);
         return new(manifest.Id, manifest.Name, manifest.Version, !state.TryGetValue(manifest.Id, out var enabled) || enabled, true, false);
     }
 
-    private Dictionary<string, bool> ReadState()
-    {
-        var path = Path.Combine(_root, StateFileName);
-        return File.Exists(path)
-            ? JsonSerializer.Deserialize<Dictionary<string, bool>>(File.ReadAllText(path)) ?? new(StringComparer.OrdinalIgnoreCase)
-            : new(StringComparer.OrdinalIgnoreCase);
-    }
+    private Dictionary<string, bool> ReadState() => ModulePackageState.Read(_root);
 
     private Dictionary<string, ModuleManifest> ReadInstalledManifests()
     {
@@ -212,7 +256,7 @@ public sealed class ModulePackageManager(IModuleManifestParser manifestParser, s
             var manifestPath = Path.Combine(path, "module.json");
             if (!File.Exists(manifestPath)) continue;
             using var stream = File.OpenRead(manifestPath);
-            var manifest = manifestParser.Parse(stream);
+            var manifest = _manifestParser.Parse(stream);
             if (!manifests.TryAdd(manifest.Id, manifest)) throw new InvalidOperationException($"Duplicate installed module ID '{manifest.Id}'.");
         }
         return manifests;
@@ -221,10 +265,26 @@ public sealed class ModulePackageManager(IModuleManifestParser manifestParser, s
     private void WriteState(Dictionary<string, bool> state)
     {
         Directory.CreateDirectory(_root);
-        var path = Path.Combine(_root, StateFileName);
-        var temporary = path + ".tmp";
-        File.WriteAllText(temporary, JsonSerializer.Serialize(state, StateJsonOptions));
-        File.Move(temporary, path, overwrite: true);
+        var path = Path.Combine(_root, ModulePackageState.FileName);
+        var temporary = Path.Combine(_root, $".{ModulePackageState.FileName}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                JsonSerializer.Serialize(stream, state, StateJsonOptions);
+                stream.Flush(flushToDisk: true);
+            }
+            _files.MoveFile(temporary, path, overwrite: true);
+        }
+        catch (Exception failure)
+        {
+            try { if (File.Exists(temporary)) _files.DeleteFile(temporary); }
+            catch (Exception cleanupFailure)
+            {
+                throw new AggregateException("Module state could not be saved and its temporary file could not be cleaned up.", failure, cleanupFailure);
+            }
+            throw;
+        }
     }
 
     private static void ValidateId(string moduleId)

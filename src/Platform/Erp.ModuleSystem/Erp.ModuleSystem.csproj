@@ -3,6 +3,7 @@
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="..\Erp.Abstractions\Erp.Abstractions.csproj" />
+    <InternalsVisibleTo Include="Erp.UnitTests" />
   </ItemGroup>
 
 </Project>

@@ -12,6 +12,7 @@ public sealed class ExternalModuleCatalog(IModuleManifestParser manifestParser)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
         var root = Path.GetFullPath(rootPath);
+        using var lease = ModuleRootSynchronization.Acquire(root);
         if (!Directory.Exists(root)) return [];
         var disabled = ModulePackageManager.DisabledModules(root);
         var assemblies = new List<Assembly>();
