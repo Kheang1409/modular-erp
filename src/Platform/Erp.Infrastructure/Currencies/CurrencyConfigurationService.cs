@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using Erp.Abstractions.Auditing;
 using Erp.Abstractions.Context;
 using Erp.Abstractions.Currencies;
+using Erp.Abstractions.Persistence;
 using Erp.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -12,7 +13,8 @@ public sealed partial class CurrencyConfigurationService(
     PlatformDbContext database,
     ITenantContext tenantContext,
     ICompanyContext companyContext,
-    IAuditLogWriter auditLog) : ICurrencyConfigurationService
+    IAuditLogWriter auditLog,
+    IBusinessTransactionCoordinator transactions) : ICurrencyConfigurationService
 {
     public async Task<CurrencyConfiguration> GetAsync(CancellationToken cancellationToken)
     {
@@ -47,6 +49,8 @@ public sealed partial class CurrencyConfigurationService(
         if (symbol.Length is < 1 or > 10) throw new ArgumentException("Currency symbol must contain between 1 and 10 characters.", nameof(request));
         if (request.MinorUnits is < 0 or > 6) throw new ArgumentException("Currency minor units must be between 0 and 6.", nameof(request));
 
+        await using var transaction = await transactions.BeginAsync(database, cancellationToken);
+        await LockCompanyAsync(tenantId, companyId, cancellationToken);
         var currency = await database.CompanyCurrencies.SingleOrDefaultAsync(
             x => x.CompanyId == companyId && x.Code == code, cancellationToken);
         if (currency is null)
@@ -85,15 +89,19 @@ public sealed partial class CurrencyConfigurationService(
                 JsonSerializer.Serialize(new { currency.Name, currency.Symbol, currency.MinorUnits, currency.IsActive })));
         }
         await SaveAsync(cancellationToken);
-        return new(currency.Code, currency.Name, currency.Symbol, currency.MinorUnits, currency.IsActive, currency.ConcurrencyStamp);
+        var result = new CurrencyDefinition(currency.Code, currency.Name, currency.Symbol, currency.MinorUnits, currency.IsActive, currency.ConcurrencyStamp);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     public async Task<CurrencyConfiguration> SetBaseCurrencyAsync(SetBaseCurrencyRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var (_, companyId) = RequireContext();
+        var (tenantId, companyId) = RequireContext();
         var code = NormalizeCode(request.Code);
         var expected = NormalizeCode(request.ExpectedBaseCurrencyCode);
+        await using var transaction = await transactions.BeginAsync(database, cancellationToken);
+        await LockCompanyAsync(tenantId, companyId, cancellationToken);
         if (!await database.CompanyCurrencies.AnyAsync(x => x.CompanyId == companyId && x.Code == code && x.IsActive, cancellationToken))
             throw new ArgumentException("The base currency must be configured and active.", nameof(request));
         var affected = await database.Companies
@@ -103,7 +111,9 @@ public sealed partial class CurrencyConfigurationService(
         auditLog.Append(new("currency.base.changed", "Company", companyId.ToString(), null,
             JsonSerializer.Serialize(new { BaseCurrencyCode = expected }), JsonSerializer.Serialize(new { BaseCurrencyCode = code })));
         await database.SaveChangesAsync(cancellationToken);
-        return await GetAsync(cancellationToken);
+        var result = await GetAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     public async Task<ExchangeRateDefinition> AddExchangeRateAsync(AddExchangeRateRequest request, CancellationToken cancellationToken)
@@ -114,6 +124,8 @@ public sealed partial class CurrencyConfigurationService(
         var to = NormalizeCode(request.ToCurrencyCode);
         if (from == to) throw new ArgumentException("Exchange-rate currencies must be different.", nameof(request));
         if (request.Rate <= 0) throw new ArgumentException("Exchange rate must be greater than zero.", nameof(request));
+        await using var transaction = await transactions.BeginAsync(database, cancellationToken);
+        await LockCompanyAsync(tenantId, companyId, cancellationToken);
         var activeCodes = await database.CompanyCurrencies
             .Where(x => x.CompanyId == companyId && x.IsActive && (x.Code == from || x.Code == to))
             .Select(x => x.Code).ToListAsync(cancellationToken);
@@ -135,7 +147,22 @@ public sealed partial class CurrencyConfigurationService(
         auditLog.Append(new("exchange_rate.created", "ExchangeRate", rate.Id.ToString(), null, null,
             JsonSerializer.Serialize(new { From = from, To = to, rate.Rate, rate.EffectiveDate })));
         await SaveAsync(cancellationToken);
-        return new(rate.Id, from, to, rate.Rate, rate.EffectiveDate);
+        var result = new ExchangeRateDefinition(rate.Id, from, to, rate.Rate, rate.EffectiveDate);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
+    }
+
+    private async Task LockCompanyAsync(Guid tenantId, Guid companyId, CancellationToken cancellationToken)
+    {
+        // Serialize currency writes for this company before checking active/base state.
+        // The lock follows the existing transaction's lifetime, including an outer scope.
+        var company = await database.Companies.FromSqlInterpolated($"""
+            SELECT * FROM platform.companies
+            WHERE "TenantId" = {tenantId} AND "Id" = {companyId}
+            FOR UPDATE
+            """).AsNoTracking().SingleOrDefaultAsync(cancellationToken);
+        if (company is null)
+            throw new InvalidOperationException("The selected company does not exist in the active tenant.");
     }
 
     private (Guid TenantId, Guid CompanyId) RequireContext() => (

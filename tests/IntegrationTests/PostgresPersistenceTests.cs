@@ -304,7 +304,8 @@ public sealed class PostgresPersistenceTests
                 new HttpContextAccessor { HttpContext = requestContext },
                 new FixedClock(new DateTimeOffset(2026, 9, 13, 12, 2, 0, TimeSpan.Zero)));
             var currencyService = new CurrencyConfigurationService(
-                currencyContext, tenantContext, currencyCompanyContext, currencyAudit);
+                currencyContext, tenantContext, currencyCompanyContext, currencyAudit,
+                new BusinessTransactionCoordinator(currencyContext));
             var usd = await currencyService.ConfigureAsync(
                 new ConfigureCurrencyRequest("usd", "US Dollar", "$", 2, true), CancellationToken.None);
             var khr = await currencyService.ConfigureAsync(
@@ -325,7 +326,8 @@ public sealed class PostgresPersistenceTests
             var isolatedCurrencyService = new CurrencyConfigurationService(
                 isolatedCurrencyContext, tenantBContext, new FixedCompanyContext(new CompanyId(companyBId)),
                 new AuditLogService(isolatedCurrencyContext, tenantBContext, new FixedCompanyContext(new CompanyId(companyBId)),
-                    new HttpContextAccessor(), new FixedClock(DateTimeOffset.UtcNow)));
+                    new HttpContextAccessor(), new FixedClock(DateTimeOffset.UtcNow)),
+                new BusinessTransactionCoordinator(isolatedCurrencyContext));
             Assert.Empty((await isolatedCurrencyService.GetAsync(CancellationToken.None)).Currencies);
             Assert.Equal("USD", (await isolatedCurrencyService.GetAsync(CancellationToken.None)).BaseCurrencyCode);
 
