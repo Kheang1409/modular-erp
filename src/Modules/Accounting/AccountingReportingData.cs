@@ -32,11 +32,16 @@ public sealed class AccountingReportingData(AccountingDbContext db) : IAccountin
                 line.Credit,
                 line.BaseDebit,
                 line.BaseCredit,
+                line.Sequence,
+                LineId = line.Id,
                 entry.CurrencyCode
             });
         var total = await query.CountAsync(cancellationToken);
+        var offset = ((long)page - 1) * pageSize;
+        if (offset >= total) return new(page, pageSize, total, []);
         var data = await query.OrderBy(x => x.BusinessDate).ThenBy(x => x.EntryNumber).ThenBy(x => x.AccountCode)
-            .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(cancellationToken);
+            .ThenBy(x => x.Sequence).ThenBy(x => x.LineId)
+            .Skip((int)offset).Take(pageSize).ToListAsync(cancellationToken);
         var items = data.Select(x => new GeneralLedgerReportRow(x.EntryId, x.EntryNumber, x.BusinessDate, x.Description, x.AccountId, x.AccountCode, x.AccountName, x.Debit, x.Credit, x.BaseDebit, x.BaseCredit, x.CurrencyCode)).ToList();
         return new(page, pageSize, total, items);
     }
@@ -44,18 +49,107 @@ public sealed class AccountingReportingData(AccountingDbContext db) : IAccountin
     public Task<IReadOnlyList<FinancialAccountReportRow>> ProfitAndLossAsync(DateOnly from, DateOnly to, CancellationToken cancellationToken) => Statement(from, to, [AccountType.Revenue, AccountType.Expense], cancellationToken);
     public Task<IReadOnlyList<FinancialAccountReportRow>> BalanceSheetAsync(DateOnly asOf, CancellationToken cancellationToken) => Statement(DateOnly.MinValue, asOf, [AccountType.Asset, AccountType.Liability, AccountType.Equity], cancellationToken, allowMinimumStart: true);
 
-    public async Task<IReadOnlyList<AgingReportRow>> ReceivablesAgingAsync(DateOnly asOf, CancellationToken cancellationToken)
+    public Task<IReadOnlyList<AgingReportRow>> ReceivablesAgingAsync(DateOnly asOf, CancellationToken cancellationToken)
     {
-        var d30 = asOf.AddDays(-30); var d60 = asOf.AddDays(-60); var d90 = asOf.AddDays(-90);
-        var rows = await db.CustomerInvoices.AsNoTracking().Where(x => x.InvoiceDate <= asOf && x.State != CustomerInvoiceState.Draft && x.State != CustomerInvoiceState.Cancelled && x.Total > x.AmountPaid).GroupBy(x => new { x.CustomerId, x.CustomerName, x.CurrencyCode }).Select(x => new { PartyId = x.Key.CustomerId, PartyName = x.Key.CustomerName, x.Key.CurrencyCode, Current = x.Sum(v => v.DueDate >= asOf ? v.Total - v.AmountPaid : 0), Days1To30 = x.Sum(v => v.DueDate < asOf && v.DueDate >= d30 ? v.Total - v.AmountPaid : 0), Days31To60 = x.Sum(v => v.DueDate < d30 && v.DueDate >= d60 ? v.Total - v.AmountPaid : 0), Days61To90 = x.Sum(v => v.DueDate < d60 && v.DueDate >= d90 ? v.Total - v.AmountPaid : 0), Over90 = x.Sum(v => v.DueDate < d90 ? v.Total - v.AmountPaid : 0), Total = x.Sum(v => v.Total - v.AmountPaid) }).OrderBy(x => x.PartyName).ToListAsync(cancellationToken);
-        return rows.Select(x => new AgingReportRow(x.PartyId, x.PartyName, x.CurrencyCode, x.Current, x.Days1To30, x.Days31To60, x.Days61To90, x.Over90, x.Total)).ToList();
+        var amounts = AllocatedAmounts(asOf, PaymentDirection.CustomerReceipt);
+        var documents = from invoice in db.CustomerInvoices.AsNoTracking()
+                        where invoice.InvoiceDate <= asOf && invoice.State != CustomerInvoiceState.Draft && invoice.State != CustomerInvoiceState.Cancelled
+                        join paid in amounts on invoice.Id equals paid.DocumentId into payments
+                        from paid in payments.DefaultIfEmpty()
+                        select new AgingDocument
+                        {
+                            PartyId = invoice.CustomerId,
+                            PartyName = invoice.CustomerName,
+                            CurrencyCode = invoice.CurrencyCode,
+                            DueDate = invoice.DueDate,
+                            OpenAmount = invoice.Total - ((decimal?)paid.Amount ?? 0)
+                        };
+        return Aging(documents, asOf, cancellationToken);
     }
 
-    public async Task<IReadOnlyList<AgingReportRow>> PayablesAgingAsync(DateOnly asOf, CancellationToken cancellationToken)
+    public Task<IReadOnlyList<AgingReportRow>> PayablesAgingAsync(DateOnly asOf, CancellationToken cancellationToken)
     {
-        var d30 = asOf.AddDays(-30); var d60 = asOf.AddDays(-60); var d90 = asOf.AddDays(-90);
-        var rows = await db.SupplierBills.AsNoTracking().Where(x => x.BillDate <= asOf && x.State != SupplierBillState.Draft && x.State != SupplierBillState.Cancelled && x.Total > x.AmountPaid).GroupBy(x => new { x.SupplierId, x.SupplierName, x.CurrencyCode }).Select(x => new { PartyId = x.Key.SupplierId, PartyName = x.Key.SupplierName, x.Key.CurrencyCode, Current = x.Sum(v => v.DueDate >= asOf ? v.Total - v.AmountPaid : 0), Days1To30 = x.Sum(v => v.DueDate < asOf && v.DueDate >= d30 ? v.Total - v.AmountPaid : 0), Days31To60 = x.Sum(v => v.DueDate < d30 && v.DueDate >= d60 ? v.Total - v.AmountPaid : 0), Days61To90 = x.Sum(v => v.DueDate < d60 && v.DueDate >= d90 ? v.Total - v.AmountPaid : 0), Over90 = x.Sum(v => v.DueDate < d90 ? v.Total - v.AmountPaid : 0), Total = x.Sum(v => v.Total - v.AmountPaid) }).OrderBy(x => x.PartyName).ToListAsync(cancellationToken);
-        return rows.Select(x => new AgingReportRow(x.PartyId, x.PartyName, x.CurrencyCode, x.Current, x.Days1To30, x.Days31To60, x.Days61To90, x.Over90, x.Total)).ToList();
+        var amounts = AllocatedAmounts(asOf, PaymentDirection.SupplierPayment);
+        var documents = from bill in db.SupplierBills.AsNoTracking()
+                        where bill.BillDate <= asOf && bill.State != SupplierBillState.Draft && bill.State != SupplierBillState.Cancelled
+                        join paid in amounts on bill.Id equals paid.DocumentId into payments
+                        from paid in payments.DefaultIfEmpty()
+                        select new AgingDocument
+                        {
+                            PartyId = bill.SupplierId,
+                            PartyName = bill.SupplierName,
+                            CurrencyCode = bill.CurrencyCode,
+                            DueDate = bill.DueDate,
+                            OpenAmount = bill.Total - ((decimal?)paid.Amount ?? 0)
+                        };
+        return Aging(documents, asOf, cancellationToken);
+    }
+
+    private IQueryable<AllocatedAmount> AllocatedAmounts(DateOnly asOf, PaymentDirection direction)
+    {
+        var allocations = from allocation in db.PaymentAllocations.AsNoTracking()
+                          join payment in db.Payments.AsNoTracking() on allocation.PaymentId equals payment.Id
+                          where payment.Direction == direction && (payment.State == PaymentState.Posted || payment.State == PaymentState.Reversed)
+                          select new
+                          {
+                              DocumentId = direction == PaymentDirection.CustomerReceipt ? allocation.CustomerInvoiceId : allocation.SupplierBillId,
+                              allocation.Amount,
+                              payment.PaymentDate,
+                              payment.State,
+                              payment.ReversalJournalEntryId
+                          };
+        var paid = allocations.Where(x => x.DocumentId != null && x.PaymentDate <= asOf)
+            .Select(x => new AllocatedAmount { DocumentId = x.DocumentId!.Value, Amount = x.Amount });
+        // Original and compensating effects have independent business dates. Do not use
+        // today's AmountPaid cache or drop a reversed payment's earlier allocation.
+        var reversed = from allocation in allocations
+                       join entry in db.JournalEntries.AsNoTracking() on allocation.ReversalJournalEntryId equals (Guid?)entry.Id
+                       where allocation.DocumentId != null && allocation.State == PaymentState.Reversed
+                           && entry.State == JournalEntryState.Posted && entry.BusinessDate <= asOf
+                       select new AllocatedAmount { DocumentId = allocation.DocumentId!.Value, Amount = -allocation.Amount };
+        return paid.Concat(reversed).GroupBy(x => x.DocumentId)
+            .Select(x => new AllocatedAmount { DocumentId = x.Key, Amount = x.Sum(v => v.Amount) });
+    }
+
+    private static async Task<IReadOnlyList<AgingReportRow>> Aging(IQueryable<AgingDocument> documents, DateOnly asOf, CancellationToken cancellationToken)
+    {
+        if (asOf == default) throw new ArgumentException("A valid as-of business date is required.", nameof(asOf));
+        var d30 = DateOnly.FromDayNumber(Math.Max(0, asOf.DayNumber - 30));
+        var d60 = DateOnly.FromDayNumber(Math.Max(0, asOf.DayNumber - 60));
+        var d90 = DateOnly.FromDayNumber(Math.Max(0, asOf.DayNumber - 90));
+        var rows = await documents.Where(x => x.OpenAmount > 0)
+            .GroupBy(x => new { x.PartyId, x.PartyName, x.CurrencyCode })
+            .Select(x => new
+            {
+                x.Key.PartyId,
+                x.Key.PartyName,
+                x.Key.CurrencyCode,
+                Current = x.Sum(v => v.DueDate >= asOf ? v.OpenAmount : 0),
+                Days1To30 = x.Sum(v => v.DueDate < asOf && v.DueDate >= d30 ? v.OpenAmount : 0),
+                Days31To60 = x.Sum(v => v.DueDate < d30 && v.DueDate >= d60 ? v.OpenAmount : 0),
+                Days61To90 = x.Sum(v => v.DueDate < d60 && v.DueDate >= d90 ? v.OpenAmount : 0),
+                Over90 = x.Sum(v => v.DueDate < d90 ? v.OpenAmount : 0),
+                Total = x.Sum(v => v.OpenAmount)
+            })
+            .OrderBy(x => x.PartyName).ThenBy(x => x.PartyId).ThenBy(x => x.CurrencyCode)
+            .ToListAsync(cancellationToken);
+        return rows.Select(x => new AgingReportRow(x.PartyId, x.PartyName, x.CurrencyCode,
+            x.Current, x.Days1To30, x.Days31To60, x.Days61To90, x.Over90, x.Total)).ToList();
+    }
+
+    private sealed class AllocatedAmount
+    {
+        public Guid DocumentId { get; init; }
+        public decimal Amount { get; init; }
+    }
+
+    private sealed class AgingDocument
+    {
+        public Guid PartyId { get; init; }
+        public required string PartyName { get; init; }
+        public required string CurrencyCode { get; init; }
+        public DateOnly DueDate { get; init; }
+        public decimal OpenAmount { get; init; }
     }
 
     public async Task<IReadOnlyList<CashSummaryRow>> CashSummaryAsync(DateOnly from, DateOnly to, CancellationToken cancellationToken)

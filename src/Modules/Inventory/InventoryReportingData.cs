@@ -34,6 +34,15 @@ public sealed class InventoryReportingData(InventoryDbContext db) : IInventoryRe
 
     public async Task<InventoryMovementReportPage> MovementsAsync(DateOnly startDate, DateOnly endDate, int page, int pageSize, CancellationToken cancellationToken)
     {
-        if (startDate == default || endDate == default || startDate > endDate) throw new ArgumentException("A valid business-date range is required."); page = Math.Max(1, page); pageSize = Math.Clamp(pageSize, 1, 200); var query = db.StockMoves.AsNoTracking().Where(x => x.State == StockMoveState.Completed && x.BusinessDate >= startDate && x.BusinessDate <= endDate); var total = await query.CountAsync(cancellationToken); var data = await query.OrderBy(x => x.BusinessDate).ThenBy(x => x.Number).Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(cancellationToken); return new(page, pageSize, total, data.Select(x => new InventoryMovementReportRow(x.Id, x.Number, x.Type.ToString(), x.ProductId, x.ProductSku, x.UnitCode, x.Quantity, x.SourceLocationId, x.DestinationLocationId, x.BusinessDate, x.ReferenceDocumentType, x.ReferenceDocumentId)).ToList());
+        if (startDate == default || endDate == default || startDate > endDate) throw new ArgumentException("A valid business-date range is required.");
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 200);
+        var query = db.StockMoves.AsNoTracking().Where(x => x.State == StockMoveState.Completed && x.BusinessDate >= startDate && x.BusinessDate <= endDate);
+        var total = await query.CountAsync(cancellationToken);
+        var offset = ((long)page - 1) * pageSize;
+        if (offset >= total) return new(page, pageSize, total, []);
+        var data = await query.OrderBy(x => x.BusinessDate).ThenBy(x => x.Number).ThenBy(x => x.Id)
+            .Skip((int)offset).Take(pageSize).ToListAsync(cancellationToken);
+        return new(page, pageSize, total, data.Select(x => new InventoryMovementReportRow(x.Id, x.Number, x.Type.ToString(), x.ProductId, x.ProductSku, x.UnitCode, x.Quantity, x.SourceLocationId, x.DestinationLocationId, x.BusinessDate, x.ReferenceDocumentType, x.ReferenceDocumentId)).ToList());
     }
 }
