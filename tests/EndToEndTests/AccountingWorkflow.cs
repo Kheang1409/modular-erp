@@ -7,7 +7,7 @@ namespace Erp.EndToEndTests;
 
 internal static class AccountingWorkflow
 {
-    public static async Task VerifyAsync(IPage page, string baseUrl, string productSku)
+    public static async Task<ReportingWorkflow.AccountingFixture> VerifyAsync(IPage page, string baseUrl, string productSku)
     {
         var products = await GetAsync(page, baseUrl, $"/api/v1/products/?search={productSku}");
         var product = products.GetProperty("items").EnumerateArray().Single(item => Text(item, "sku") == productSku);
@@ -105,6 +105,7 @@ internal static class AccountingWorkflow
             }
             await VerifyViewportAsync(page, route.Heading);
         }
+        return new(DateOnly.Parse(fixture.Date, CultureInfo.InvariantCulture), fixture.Currency, fixture.JournalId, fixture.Accounts);
     }
 
     private static async Task<Fixture> ConfigureAsync(IPage page, string baseUrl, string currency)

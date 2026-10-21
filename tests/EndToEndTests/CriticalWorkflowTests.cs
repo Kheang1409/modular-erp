@@ -88,7 +88,9 @@ public sealed partial class CriticalWorkflowTests(ITestOutputHelper output)
         await SalesWorkflow.VerifyAsync(page, baseUrl, productSku);
         await PurchasingWorkflow.VerifyAsync(page, baseUrl, productSku);
         await InventoryWorkflow.VerifyAsync(page, baseUrl, productSku);
-        await AccountingWorkflow.VerifyAsync(page, baseUrl, productSku);
+        var accounting = await AccountingWorkflow.VerifyAsync(page, baseUrl, productSku);
+        output.WriteLine("ERP_E2E_PHASE=reporting-workflow");
+        await ReportingWorkflow.VerifyAsync(page, baseUrl, productSku, accounting);
 
         await page.GotoAsync(new Uri(new Uri(baseUrl), "/products").ToString());
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Products and services", Level = 1 })).ToBeVisibleAsync();
