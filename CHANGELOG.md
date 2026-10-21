@@ -4,6 +4,10 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## 0.1.0 - unreleased
 
+- Reconstructed receivables/payables aging from dated allocations and compensating reversal journals instead of today's paid-balance cache, preserving settled-document history, currency separation, and tenant/company filters without schema or write-policy changes.
+- Added accessible general-ledger and movement-history paging, totals, 25/50/100-row controls, applied-filter/CSV consistency, and named keyboard-scrollable Reporting tables.
+- Stabilized detail ordering for repeated journal accounts and guarded large page offsets against integer overflow while retaining page normalization and existing public contracts.
+- Buffered CSV streaming per 200-row batch/page, validated initial export queries before response headers, and added completeness, escaping, cancellation, error, permission, historical-aging, and multi-page regressions.
 - Exercise Accounting workflows through the real menu links while retaining fresh direct-page accessibility checks; add status-only browser transport diagnostics without changing authentication, rate limits, or assertion timeouts.
 - Made the login accessibility regression wait for interactivity and inspect the live DOM atomically, avoiding false unlabeled-input failures from detached pre-hydration nodes without relaxing label requirements.
 - Preserved original multi-company browser workflow failures when cleanup also fails, and report unsuccessful company-navigation HTTP status before waiting for an interactive page; authentication and rate limits remain unchanged.

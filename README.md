@@ -62,6 +62,13 @@ Open **Reports → Performance dashboard** for company-specific charts and summa
 
 Business-date filters are explicit. Operational charts keep currencies separate, financial statements retain the company's base currency, and stock quantities remain separate by unit. Charts include readable data alternatives, distinguish request failures from empty results, and never substitute demonstration values for missing business activity. Historical stock is shown as of the selected date; reservations reflect currently active reservations. See the [reporting guide](docs/modules/reporting.md) for details.
 
+General ledger and movement history have accessible paging, row totals, and
+25/50/100-row controls. Paging and CSV downloads use the last applied dates, not
+unsubmitted edits. Receivables/payables aging reconstructs balances from dated
+allocations and reversal journals, including documents settled after the chosen
+date. Buffered CSV exports keep invariant formatting and spreadsheet protection;
+paged exports are live reads, not a snapshot of concurrent changes.
+
 ## Local development
 
 To run the host outside Docker, start PostgreSQL and configure the host separately. `dotnet run` does **not** load the Compose `.env` file. Replace the placeholders below and match the database name, username, password, and published port in your local configuration:
@@ -114,7 +121,15 @@ Run the complete browser suite only against a disposable test environment: `Crit
 
 This is a pre-release community preview, not a production-readiness guarantee. Contacts, Products, CRM, Sales, Purchasing, Inventory, and Accounting mutations enlist their business changes and platform audit records in one PostgreSQL transaction. CRM includes pipeline configuration, assignments, activities, and both audit entries for lead conversion. Sales and Purchasing include document numbering, document lines, and their existing outbox events. Inventory includes warehouse/location changes, movement batches and completion, corrections, reservations, numbering, and its existing events while retaining advisory stock locks and immutable completed movements. Accounting includes configuration, ledger posting/reversals, invoices, bills, payment allocations/reversals, financial controls, and its six existing events; posted ledger history and existing GUID-based number formats remain unchanged. Each valid Contacts or Products CSV row still commits independently during ordinary imports. See the [transaction boundary](docs/architecture/overview.md#business-transaction-boundary) and the [upgrade article](docs/updates/reliability-and-ci-upgrade.md).
 
-Next release gates are reviewing any remaining platform/extension write boundaries, completing realistic-volume reporting/performance and security checks, proving production-like restore and module-upgrade recovery, obtaining a green complete CI run, and publishing reviewed release notes and a version tag. New writable modules must explicitly adopt the shared boundary. Advanced inventory costing, lots/serials, and additional ERP modules remain separate future extensions.
+Reporting now adds historical-aging, stable multi-page detail, export-streaming,
+and responsive accessibility regressions. These bounded datasets complement the
+existing ledger performance check; they do not certify production-scale capacity.
+Next release gates are reviewing remaining platform/extension write boundaries,
+production-volume performance and security checks, production-like restore and
+module-upgrade recovery, a green complete CI run, and reviewed release notes and
+a version tag. New writable modules must explicitly adopt the shared boundary.
+Advanced inventory costing, lots/serials, and additional ERP modules remain
+separate future extensions.
 
 ## Architecture and extension points
 

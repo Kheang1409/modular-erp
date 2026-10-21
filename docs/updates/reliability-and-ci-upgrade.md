@@ -183,6 +183,38 @@ list row used an empty GUID where the individual endpoint returned null, hiding
 the Reverse action. The list now returns the same nullable link without modifying
 posted history.
 
+## Reporting: the date on a report must mean something
+
+The next review found a subtle aging defect: a document fully settled today could
+disappear from an earlier as-of report. Subtracting the current paid balance does
+not reconstruct history. Receivables and payables now use dated allocation facts,
+including the original effect of a reversed payment and its separately dated
+compensating journal. A later settlement no longer rewrites an earlier report.
+
+The existing business-date rules remain intact. This is not an audit-time snapshot
+or a new prohibition on backdating; currencies and company boundaries stay
+separate. Cash summary semantics and current chart-of-account classifications are
+unchanged, and no schema migration or additional permission is introduced.
+
+The detail screens also exposed only their first 100 rows. General ledger and
+movement history now show totals, Previous/Next controls, and selectable page
+sizes. Applied dates stay consistent across paging and CSV downloads, even while
+the user is editing a new filter. Stable line ordering prevents repeated accounts
+from drifting across ledger pages, and large offsets cannot overflow.
+
+CSV output now buffers rows instead of flushing each one, retaining invariant
+formatting, quoted fields, formula protection, and cancellation. Invalid initial
+queries return structured errors before streaming starts; a failure after output
+begins terminates the export. Paged exports still use live sequential reads with
+counts, not a promise of snapshot consistency during concurrent changes.
+
+Dedicated PostgreSQL cases exercise payment/reversal timelines, every aging bucket
+edge, currency and tenant/company isolation, and detail datasets spanning several
+pages. Browser workflows compare populated tables with API and CSV results and
+exercise keyboard-accessible report regions at desktop and phone widths. These
+fixtures strengthen correctness evidence without claiming production-scale load
+certification or weakening the existing ledger performance budget.
+
 ## Verification should be real, not a passing no-op
 
 Integration tests now require disposable PostgreSQL and storage containers. If
@@ -272,8 +304,8 @@ successful save; rendered headings and persisted-state assertions remain in plac
 
 ## What remains before a production release
 
-The next steps are reviewing any remaining platform/extension write boundaries,
-measuring reporting and performance with realistic data volumes, completing security
+The next steps are reviewing remaining platform/extension write boundaries,
+measuring production-volume performance beyond the bounded reporting fixtures, completing security
 and recovery verification, and strengthening module-upgrade failure recovery.
 A complete green CI run and reviewed release notes and version tag remain release
 gates. Production deployments also need their own HTTPS, secret management,
