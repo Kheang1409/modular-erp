@@ -98,6 +98,7 @@ public sealed class BackgroundJob : ITenantOwned
     public int Attempts { get; set; }
     public int MaxAttempts { get; set; }
     public DateTimeOffset ExecuteAfterUtc { get; set; }
+    public Guid? LeaseId { get; set; }
     public DateTimeOffset? LockedUntilUtc { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset? CompletedAtUtc { get; set; }
@@ -118,6 +119,7 @@ public sealed class OutboxMessage : ITenantOwned
     public DateTimeOffset? ProcessedAtUtc { get; set; }
     public DateTimeOffset? DeadLetteredAtUtc { get; set; }
     public DateTimeOffset NextAttemptAtUtc { get; set; }
+    public Guid? LeaseId { get; set; }
     public DateTimeOffset? LockedUntilUtc { get; set; }
     public int RetryCount { get; set; }
     public string? LastError { get; set; }

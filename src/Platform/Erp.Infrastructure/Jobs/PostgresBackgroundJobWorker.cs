@@ -48,9 +48,10 @@ public sealed class PostgresBackgroundJobWorker(
             await using var database = new PlatformDbContext(databaseOptions);
             var now = timeProvider.GetUtcNow();
             var lockedUntil = now.AddSeconds(Math.Clamp(_options.LeaseSeconds, 10, 3600));
+            var leaseId = Guid.NewGuid();
             var claimed = await database.BackgroundJobs.FromSqlInterpolated($$"""
                 UPDATE platform.background_jobs
-                SET "State" = 'running', "Attempts" = "Attempts" + 1, "LockedUntilUtc" = {{lockedUntil}}
+                SET "State" = 'running', "Attempts" = "Attempts" + 1, "LockedUntilUtc" = {{lockedUntil}}, "LeaseId" = {{leaseId}}
                 WHERE "Id" = (
                     SELECT "Id" FROM platform.background_jobs
                     WHERE ("State" = 'queued' AND "ExecuteAfterUtc" <= {{now}})
@@ -92,8 +93,10 @@ public sealed class PostgresBackgroundJobWorker(
             var task = method.Invoke(handler, [payload, context, cancellationToken]) as Task
                 ?? throw new InvalidOperationException("The background job handler did not return a task.");
             await task;
-            await UpdateResultAsync(job, succeeded: true, null, cancellationToken);
-            JobLog.Completed(logger, job.Name, job.Id, job.Attempts);
+            if (await UpdateResultAsync(job, succeeded: true, null, cancellationToken))
+                JobLog.Completed(logger, job.Name, job.Id, job.Attempts);
+            else
+                JobLog.LeaseLost(logger, job.Name, job.Id, job.Attempts);
         }
         catch (TargetInvocationException exception) when (exception.InnerException is not null)
         {
@@ -108,12 +111,15 @@ public sealed class PostgresBackgroundJobWorker(
 
     private async Task FailAsync(BackgroundJob job, Exception exception, CancellationToken cancellationToken)
     {
-        await UpdateResultAsync(job, succeeded: false, exception, cancellationToken);
-        JobLog.Failed(logger, job.Name, job.Id, job.Attempts, exception.GetType().Name);
+        if (await UpdateResultAsync(job, succeeded: false, exception, cancellationToken))
+            JobLog.Failed(logger, job.Name, job.Id, job.Attempts, exception.GetType().Name);
+        else
+            JobLog.LeaseLost(logger, job.Name, job.Id, job.Attempts);
     }
 
-    private async Task UpdateResultAsync(BackgroundJob job, bool succeeded, Exception? exception, CancellationToken cancellationToken)
+    private async Task<bool> UpdateResultAsync(BackgroundJob job, bool succeeded, Exception? exception, CancellationToken cancellationToken)
     {
+        if (job.LeaseId is null) return false;
         await using var scope = scopeFactory.CreateAsyncScope();
         var databaseOptions = scope.ServiceProvider.GetRequiredService<DbContextOptions<PlatformDbContext>>();
         await using var database = new PlatformDbContext(databaseOptions);
@@ -122,12 +128,19 @@ public sealed class PostgresBackgroundJobWorker(
         var state = succeeded ? "succeeded" : terminal ? "dead_letter" : "queued";
         var retryAt = succeeded || terminal ? job.ExecuteAfterUtc : now.AddSeconds(Math.Min(300, Math.Pow(2, job.Attempts - 1)));
         var error = exception?.GetType().Name;
-        await database.BackgroundJobs.IgnoreQueryFilters().Where(x => x.Id == job.Id).ExecuteUpdateAsync(update => update
+        // Expiry permits another claim; only a replacement/replay invalidates ownership.
+        // Attempt counters and timestamps can repeat, so neither identifies the claim.
+        var affected = await database.BackgroundJobs.IgnoreQueryFilters()
+            .Where(x => x.Id == job.Id && x.TenantId == job.TenantId && x.CompanyId == job.CompanyId
+                && x.LeaseId == job.LeaseId && x.State == "running")
+            .ExecuteUpdateAsync(update => update
             .SetProperty(x => x.State, state)
             .SetProperty(x => x.ExecuteAfterUtc, retryAt)
             .SetProperty(x => x.LockedUntilUtc, (DateTimeOffset?)null)
+            .SetProperty(x => x.LeaseId, (Guid?)null)
             .SetProperty(x => x.CompletedAtUtc, terminal ? now : null)
             .SetProperty(x => x.LastError, error), cancellationToken);
+        return affected == 1;
     }
 }
 
@@ -141,4 +154,7 @@ internal static partial class JobLog
 
     [LoggerMessage(3102, LogLevel.Error, "Background job {JobName} ({JobId}) failed on attempt {Attempt} with {FailureType}.")]
     public static partial void Failed(ILogger logger, string jobName, Guid jobId, int attempt, string failureType);
+
+    [LoggerMessage(3103, LogLevel.Information, "Background job {JobName} ({JobId}) result ignored because attempt {Attempt} no longer owns its lease.")]
+    public static partial void LeaseLost(ILogger logger, string jobName, Guid jobId, int attempt);
 }

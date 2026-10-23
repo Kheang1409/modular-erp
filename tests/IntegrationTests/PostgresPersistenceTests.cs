@@ -421,7 +421,8 @@ public sealed class PostgresPersistenceTests
                 var recoveryAudit = new AuditLogService(
                     recoveryContext, tenantContext, currencyCompanyContext,
                     new HttpContextAccessor { HttpContext = requestContext }, new FixedClock(DateTimeOffset.UtcNow));
-                var recovery = new QueueOperationsService(recoveryContext, currencyCompanyContext, new FixedClock(DateTimeOffset.UtcNow), recoveryAudit);
+                var recovery = new QueueOperationsService(recoveryContext, currencyCompanyContext, new FixedClock(DateTimeOffset.UtcNow), recoveryAudit,
+                    new BusinessTransactionCoordinator(recoveryContext));
                 var snapshot = await recovery.GetAsync(50, CancellationToken.None);
                 Assert.Contains(snapshot.Jobs, item => item.Id == failingId);
                 Assert.True(await recovery.ReplayJobAsync(failingId, CancellationToken.None));
@@ -496,7 +497,8 @@ public sealed class PostgresPersistenceTests
                 var recoveryAudit = new AuditLogService(
                     deadLetterContext, tenantContext, currencyCompanyContext,
                     new HttpContextAccessor { HttpContext = requestContext }, new FixedClock(DateTimeOffset.UtcNow));
-                var recovery = new QueueOperationsService(deadLetterContext, currencyCompanyContext, new FixedClock(DateTimeOffset.UtcNow), recoveryAudit);
+                var recovery = new QueueOperationsService(deadLetterContext, currencyCompanyContext, new FixedClock(DateTimeOffset.UtcNow), recoveryAudit,
+                    new BusinessTransactionCoordinator(deadLetterContext));
                 Assert.True(await recovery.ReplayOutboxAsync(deadLetterId, CancellationToken.None));
                 Assert.False(await recovery.ReplayOutboxAsync(deadLetterId, CancellationToken.None));
             }

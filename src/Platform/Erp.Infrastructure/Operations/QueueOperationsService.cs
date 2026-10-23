@@ -1,6 +1,7 @@
 using Erp.Abstractions.Auditing;
 using Erp.Abstractions.Context;
 using Erp.Abstractions.Operations;
+using Erp.Abstractions.Persistence;
 using Erp.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -10,7 +11,8 @@ public sealed class QueueOperationsService(
     PlatformDbContext database,
     ICompanyContext companyContext,
     IClock clock,
-    IAuditLogWriter audit) : IQueueOperationsService
+    IAuditLogWriter audit,
+    IBusinessTransactionCoordinator transactions) : IQueueOperationsService
 {
     public async Task<QueueOperationsSnapshot> GetAsync(int limit, CancellationToken cancellationToken)
     {
@@ -34,34 +36,52 @@ public sealed class QueueOperationsService(
     public async Task<bool> ReplayOutboxAsync(Guid id, CancellationToken cancellationToken)
     {
         var companyId = RequireCompany();
-        var item = await database.OutboxMessages.SingleOrDefaultAsync(
-            value => value.Id == id && value.CompanyId == companyId && value.DeadLetteredAtUtc != null, cancellationToken);
-        if (item is null) return false;
-        item.DeadLetteredAtUtc = null;
-        item.ProcessedAtUtc = null;
-        item.NextAttemptAtUtc = clock.UtcNow;
-        item.LockedUntilUtc = null;
-        item.RetryCount = 0;
-        item.LastError = null;
-        audit.Append(new("platform.outbox.replayed", "OutboxMessage", item.Id.ToString(), null, null, null));
+        await using var transaction = await transactions.BeginAsync(database, cancellationToken);
+        var now = clock.UtcNow;
+        var affected = await database.OutboxMessages
+            .Where(value => value.Id == id && value.CompanyId == companyId && value.DeadLetteredAtUtc != null)
+            .ExecuteUpdateAsync(update => update
+                .SetProperty(value => value.DeadLetteredAtUtc, (DateTimeOffset?)null)
+                .SetProperty(value => value.ProcessedAtUtc, (DateTimeOffset?)null)
+                .SetProperty(value => value.NextAttemptAtUtc, now)
+                .SetProperty(value => value.LeaseId, (Guid?)null)
+                .SetProperty(value => value.LockedUntilUtc, (DateTimeOffset?)null)
+                .SetProperty(value => value.RetryCount, 0)
+                .SetProperty(value => value.LastError, (string?)null), cancellationToken);
+        if (affected == 0)
+        {
+            await transaction.CommitAsync(cancellationToken);
+            return false;
+        }
+        audit.Append(new("platform.outbox.replayed", "OutboxMessage", id.ToString(), null, null, null));
         await audit.FlushAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return true;
     }
 
     public async Task<bool> ReplayJobAsync(Guid id, CancellationToken cancellationToken)
     {
         var companyId = RequireCompany();
-        var item = await database.BackgroundJobs.SingleOrDefaultAsync(
-            value => value.Id == id && value.CompanyId == companyId && value.State == "dead_letter", cancellationToken);
-        if (item is null) return false;
-        item.State = "queued";
-        item.Attempts = 0;
-        item.ExecuteAfterUtc = clock.UtcNow;
-        item.LockedUntilUtc = null;
-        item.CompletedAtUtc = null;
-        item.LastError = null;
-        audit.Append(new("platform.background_job.replayed", "BackgroundJob", item.Id.ToString(), null, null, null));
+        await using var transaction = await transactions.BeginAsync(database, cancellationToken);
+        var now = clock.UtcNow;
+        var affected = await database.BackgroundJobs
+            .Where(value => value.Id == id && value.CompanyId == companyId && value.State == "dead_letter")
+            .ExecuteUpdateAsync(update => update
+                .SetProperty(value => value.State, "queued")
+                .SetProperty(value => value.Attempts, 0)
+                .SetProperty(value => value.ExecuteAfterUtc, now)
+                .SetProperty(value => value.LeaseId, (Guid?)null)
+                .SetProperty(value => value.LockedUntilUtc, (DateTimeOffset?)null)
+                .SetProperty(value => value.CompletedAtUtc, (DateTimeOffset?)null)
+                .SetProperty(value => value.LastError, (string?)null), cancellationToken);
+        if (affected == 0)
+        {
+            await transaction.CommitAsync(cancellationToken);
+            return false;
+        }
+        audit.Append(new("platform.background_job.replayed", "BackgroundJob", id.ToString(), null, null, null));
         await audit.FlushAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return true;
     }
 

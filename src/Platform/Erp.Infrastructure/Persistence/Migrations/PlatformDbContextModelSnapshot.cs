@@ -283,6 +283,9 @@ namespace Erp.Infrastructure.Persistence.Migrations
                         .HasMaxLength(4000)
                         .HasColumnType("character varying(4000)");
 
+                    b.Property<Guid?>("LeaseId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset?>("LockedUntilUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -593,6 +596,9 @@ namespace Erp.Infrastructure.Persistence.Migrations
                     b.Property<string>("LastError")
                         .HasMaxLength(4000)
                         .HasColumnType("character varying(4000)");
+
+                    b.Property<Guid?>("LeaseId")
+                        .HasColumnType("uuid");
 
                     b.Property<DateTimeOffset?>("LockedUntilUtc")
                         .HasColumnType("timestamp with time zone");

@@ -44,9 +44,10 @@ public sealed class PostgresOutboxWorker(
             await using var database = new PlatformDbContext(databaseOptions);
             var now = timeProvider.GetUtcNow();
             var lockedUntil = now.AddSeconds(Math.Clamp(_options.LeaseSeconds, 10, 3600));
+            var leaseId = Guid.NewGuid();
             var claimed = await database.OutboxMessages.FromSqlInterpolated($$"""
                 UPDATE platform.outbox_messages
-                SET "RetryCount" = "RetryCount" + 1, "LockedUntilUtc" = {{lockedUntil}}
+                SET "RetryCount" = "RetryCount" + 1, "LockedUntilUtc" = {{lockedUntil}}, "LeaseId" = {{leaseId}}
                 WHERE "Id" = (
                     SELECT "Id" FROM platform.outbox_messages
                     WHERE "ProcessedAtUtc" IS NULL AND "DeadLetteredAtUtc" IS NULL
@@ -90,8 +91,10 @@ public sealed class PostgresOutboxWorker(
                     ?? throw new InvalidOperationException("The integration event consumer did not return a task.");
                 await task;
             }
-            await UpdateResultAsync(message, true, null, cancellationToken);
-            OutboxLog.Published(logger, message.EventType, message.Id, consumers.Length);
+            if (await UpdateResultAsync(message, true, null, cancellationToken))
+                OutboxLog.Published(logger, message.EventType, message.Id, consumers.Length);
+            else
+                OutboxLog.LeaseLost(logger, message.EventType, message.Id, message.RetryCount);
         }
         catch (TargetInvocationException exception) when (exception.InnerException is not null)
         {
@@ -106,24 +109,34 @@ public sealed class PostgresOutboxWorker(
 
     private async Task FailAsync(OutboxMessage message, Exception exception, CancellationToken cancellationToken)
     {
-        await UpdateResultAsync(message, false, exception, cancellationToken);
-        OutboxLog.Failed(logger, message.EventType, message.Id, message.RetryCount, exception.GetType().Name);
+        if (await UpdateResultAsync(message, false, exception, cancellationToken))
+            OutboxLog.Failed(logger, message.EventType, message.Id, message.RetryCount, exception.GetType().Name);
+        else
+            OutboxLog.LeaseLost(logger, message.EventType, message.Id, message.RetryCount);
     }
 
-    private async Task UpdateResultAsync(OutboxMessage message, bool succeeded, Exception? exception, CancellationToken cancellationToken)
+    private async Task<bool> UpdateResultAsync(OutboxMessage message, bool succeeded, Exception? exception, CancellationToken cancellationToken)
     {
+        if (message.LeaseId is null) return false;
         await using var scope = scopeFactory.CreateAsyncScope();
         var databaseOptions = scope.ServiceProvider.GetRequiredService<DbContextOptions<PlatformDbContext>>();
         await using var database = new PlatformDbContext(databaseOptions);
         var now = timeProvider.GetUtcNow();
         var deadLetter = !succeeded && message.RetryCount >= Math.Clamp(_options.MaxAttempts, 1, 100);
         var error = exception?.GetType().Name;
-        await database.OutboxMessages.IgnoreQueryFilters().Where(x => x.Id == message.Id).ExecuteUpdateAsync(update => update
+        // Expiry permits another claim; only a replacement/replay invalidates ownership.
+        // Attempt counters and timestamps can repeat, so neither identifies the claim.
+        var affected = await database.OutboxMessages.IgnoreQueryFilters()
+            .Where(x => x.Id == message.Id && x.TenantId == message.TenantId && x.CompanyId == message.CompanyId
+                && x.LeaseId == message.LeaseId && x.ProcessedAtUtc == null && x.DeadLetteredAtUtc == null)
+            .ExecuteUpdateAsync(update => update
             .SetProperty(x => x.ProcessedAtUtc, succeeded ? now : null)
             .SetProperty(x => x.DeadLetteredAtUtc, deadLetter ? now : null)
             .SetProperty(x => x.NextAttemptAtUtc, succeeded || deadLetter ? message.NextAttemptAtUtc : now.AddSeconds(Math.Min(300, Math.Pow(2, message.RetryCount - 1))))
             .SetProperty(x => x.LockedUntilUtc, (DateTimeOffset?)null)
+            .SetProperty(x => x.LeaseId, (Guid?)null)
             .SetProperty(x => x.LastError, error), cancellationToken);
+        return affected == 1;
     }
 }
 
@@ -137,4 +150,7 @@ internal static partial class OutboxLog
 
     [LoggerMessage(3302, LogLevel.Error, "Integration event {EventType} ({MessageId}) failed on attempt {Attempt} with {FailureType}.")]
     public static partial void Failed(ILogger logger, string eventType, Guid messageId, int attempt, string failureType);
+
+    [LoggerMessage(3303, LogLevel.Information, "Integration event {EventType} ({MessageId}) result ignored because attempt {Attempt} no longer owns its lease.")]
+    public static partial void LeaseLost(ILogger logger, string eventType, Guid messageId, int attempt);
 }
