@@ -4,6 +4,10 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## 0.1.0 - unreleased
 
+- Fenced outbox/job success and failure updates with fresh per-claim GUID lease IDs, active state, and tenant/company identity; ignored superseded results without falsely logging accepted completion or failure.
+- Made dead-letter replay conditional and atomic with audit through the shared PostgreSQL coordinator, preserving caller-owned outer transactions, no-op completion, retry counters, permissions, and at-least-once delivery contracts.
+- Added nullable queue lease columns with an additive migration and documented stop-all-old-workers rollout, legacy-lease recovery, and unchanged handler idempotency requirements.
+- Added deterministic PostgreSQL stale-worker, replay/clock-reset, cancellation, concurrent replay, audit rollback/retry, tenant/company isolation, and legacy-data migration regressions.
 - Coordinated currency configuration, base-currency changes, and exchange-rate creation with platform audit in one PostgreSQL transaction, retaining optimistic concurrency and serializing writes per tenant/company without schema or permission changes.
 - Added real-PostgreSQL currency rollback/retry, cancellation, constraint, audit-content, isolation, outer-transaction, and deterministic row-lock race regressions.
 - Kept module-update backups until enablement state is saved, restored packages on recoverable replacement/state failures, preserved recovery backups and both errors when rollback fails, and kept post-commit backup-cleanup failures from falsely reporting an uncommitted update.

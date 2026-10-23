@@ -248,6 +248,36 @@ one transaction: web lifecycle audit is written after the filesystem commit and
 can still fail independently. Crash, power-loss, failed recovery I/O, and module
 migration recovery remain operational release work, not automatic guarantees.
 
+## Queue recovery: an old worker must not overwrite a new attempt
+
+The queue review reproduced a dangerous race: an expired worker could finish
+after its replacement and erase the replacement's success. Claims already used
+row locking, but result updates checked only the record ID. Claim safety and
+completion safety are separate responsibilities.
+
+Outbox messages and background jobs now receive a fresh GUID lease ID for every
+claim. Completion and failure updates must still own that token and the active
+tenant/company row. Superseded results change nothing and emit a lease-lost
+diagnostic instead of falsely reporting a saved success or failure. Tokens remain
+distinct even when replay resets attempt counts and a clock repeats an earlier
+deadline.
+
+Replay is conditional too: only an eligible dead-letter state is reset, and that
+reset commits with its audit record. A competing stale replay cannot clear a new
+active worker's lease. Failed audit persistence or cancellation rolls back both
+state and audit, while completed no-op scopes preserve caller-owned outer work.
+
+The two nullable lease columns are an additive migration, tested against legacy
+queue rows as well as fresh installations. Deployment must stop every old worker
+before migration and restart only the upgraded version: old ID-only writers can
+otherwise bypass the new check. Existing payloads, permissions, retry limits,
+correlation IDs, and idempotency keys are retained.
+
+This protects database queue state, not exactly-once side effects. An expired
+handler may still be running while its replacement works. Consumers must remain
+idempotent, and external effects cannot be undone by rejecting a late result.
+Production workload, security, and full recovery drills remain release gates.
+
 ## Verification should be real, not a passing no-op
 
 Integration tests now require disposable PostgreSQL and storage containers. If

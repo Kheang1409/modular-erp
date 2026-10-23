@@ -36,3 +36,10 @@ Thresholds are deployment-specific and must be recorded alongside the recovery-t
 3. Inspect failure type and attempt metadata. Retrieve payloads only through controlled database access; the administration UI deliberately omits them.
 4. Fix the root cause, confirm the consumer is idempotent, then replay through **Administration > Queue recovery**.
 5. Record the incident, replay identifier, outcome, and any threshold or runbook change.
+
+Outbox event `3303` and background-job event `3103` report ignored results from
+attempts that no longer own their lease. They contain identifiers, stored
+type/name, and attempt metadata, not payloads or lease tokens. A lease-lost result
+is not an accepted success/failure. Repeated occurrences require checking handler
+duration, lease configuration, overlapping instances, and recovery/replay activity;
+do not infer exactly-once delivery from a clean final queue row.

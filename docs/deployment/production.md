@@ -23,6 +23,29 @@ Back up first, deploy the new artifact, run reviewed migrations once, then start
 
 For rolling deployments, additive schema changes must land before code that requires them. Remove old columns only in a later release after every old instance is gone. Preserve Data Protection keys across instances so authentication cookies remain readable.
 
+### Queue lease ownership upgrade
+
+`20261021143000_QueueLeaseOwnership` adds nullable UUID `LeaseId` columns to
+`platform.outbox_messages` and `platform.background_jobs`. It does not rewrite
+payloads, counters, state, deadlines, keys, or existing business records. Legacy
+rows retain null ownership until a new worker claims them; an unexpired legacy
+lease remains ineligible until its existing deadline has passed.
+
+This upgrade is **not** safe for mixed old/new workers. Old binaries update queue
+results by ID alone and can bypass the new fence. Stop all old application/worker
+processes and suspend replay administration, take the normal backup, apply the
+reviewed migration with the migration identity, then start only the new version.
+Verify readiness, normal delivery, retry/dead-letter behavior, and authorized
+replay before resuming traffic. Preserve the existing lease deadlines rather than
+manually clearing them to speed up recovery. Turning worker options off requires
+a controlled restart; it does not cancel already-running handlers by itself.
+
+If rollback is needed, stop all new workers first and inspect queue state and
+consumer side effects. Dropping a lease column discards ownership metadata; it
+cannot reverse delivered effects. Use the reviewed release/restore procedure,
+never a rolling downgrade alongside active new handlers. Schema compatibility
+alone is not a guarantee of safe mixed-version queue behavior.
+
 ## Backup and restore drill
 
 1. Record the release version and stop writes or take a transactionally consistent PostgreSQL backup.

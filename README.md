@@ -131,6 +131,12 @@ Cooperating package managers and startup discovery serialize on the same
 normalized root path on one host. Filesystem changes and the web endpoint's audit
 write are still separate commits; this is not crash-safe or multi-host recovery.
 See the [module recovery boundary](docs/modules/module-sdk.md#failure-and-recovery-boundary).
+Outbox and background-job result updates now verify a fresh per-claim lease ID,
+so superseded workers cannot overwrite a newer attempt. Dead-letter replay uses
+an eligible-state transition and commits with its audit record. Delivery remains
+at least once; handlers still need idempotent side effects. The additive queue
+lease migration requires a [stop-all-old-workers rollout](docs/deployment/production.md#queue-lease-ownership-upgrade),
+not mixed-version workers against the same database.
 Next release gates are reviewing remaining platform/extension write boundaries,
 production-volume performance and security checks, production-like restore and
 crash/migration recovery, a green complete CI run, and reviewed release notes and
