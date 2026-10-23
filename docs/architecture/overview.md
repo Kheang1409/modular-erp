@@ -2,6 +2,34 @@
 
 Open ERP begins as a modular monolith. `Erp.Host` is the only composition root. Modules implement `IErpModule`, are discovered from explicitly trusted assemblies, and register services, HTTP endpoints, permissions, navigation, and Razor component assemblies before the service provider is built.
 
+## Built-in module project boundaries
+
+For modules with a separate public contract assembly, the implementation and
+contract projects live in sibling folders. For example:
+
+```text
+src/Modules/
+|-- Purchasing/
+|   |-- Erp.Modules.Purchasing.csproj
+|   `-- ...services, endpoints, persistence, and migrations
+`-- Purchasing.Contracts/
+    |-- Erp.Modules.Purchasing.Contracts.csproj
+    `-- PurchasingContracts.cs
+```
+
+The similar names identify the contract as the public API of that module; they
+do not indicate duplicate implementations. The implementation owns behavior
+and persistence. The contract assembly exposes the interfaces and data types
+other projects may use without depending on that implementation.
+
+Project references enforce the direction of the boundary. For example, the
+Inventory implementation references the Products, Sales, Purchasing, and
+Inventory contract projects, not those modules' implementation projects.
+Architecture tests check these references and ensure contract assemblies do not
+depend on module persistence (see `DependencyBoundaryTests`). When changing
+module interactions, keep shared types in the owning contract project and avoid
+cross-module references to implementation projects or database schemas.
+
 The built-in SampleModule remains a compile-time reference, while trusted external modules can be discovered from configured folders at startup. The module system provides strict JSON manifest parsing, SHA-256 inventory verification, assembly/manifest consistency checks, semantic-version/platform checks, dependency-range validation, circular-dependency detection, topological ordering, and permission-manifest consistency. Loading requires restart and is not a security sandbox. See the [module SDK guide](../modules/module-sdk.md).
 
 `Erp.Host/Program.cs` is intentionally limited to composition flow. Host service and middleware setup, account endpoints, platform endpoints, and database/bootstrap initialization live in focused files; this keeps the executable boundary explicit without moving host concerns into business modules.

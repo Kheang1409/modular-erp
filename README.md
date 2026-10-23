@@ -42,7 +42,9 @@ Useful local endpoints:
 | Accounting | Double-entry ledger, invoices, bills, payments, fiscal controls, and reconciliation | [Accounting](docs/modules/accounting.md) |
 | Reporting | Sales, purchasing, inventory, financial statements, aging, cash, and CSV exports | [Reporting](docs/modules/reporting.md) |
 
-Modules own their persistence and communicate through public contracts. For example, `Sales` implements sales behavior while `Sales.Contracts` exposes its integration interfaces and data types; these are intentional boundaries, not duplicate modules.
+Modules own their persistence and communicate through public contracts. The
+implementation and contract projects are intentional boundaries, not duplicate
+modules; see the [module project boundary](docs/architecture/overview.md#built-in-module-project-boundaries).
 
 ## Organization and companies
 
