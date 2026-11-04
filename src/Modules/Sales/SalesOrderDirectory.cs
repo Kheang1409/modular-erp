@@ -8,7 +8,8 @@ internal sealed class SalesOrderDirectory(SalesDbContext database) : ISalesOrder
     public async Task<IReadOnlyList<SalesOrderLookup>> SearchFulfillableAsync(string? search, int limit, CancellationToken token)
     {
         limit = Math.Clamp(limit, 1, 100);
-        var query = database.SalesOrders.AsNoTracking().Where(x => x.State == SalesOrderState.Confirmed);
+        var query = database.SalesOrders.AsNoTracking()
+            .Where(x => x.State == SalesOrderState.Confirmed || x.State == SalesOrderState.PartiallyFulfilled);
         if (!string.IsNullOrWhiteSpace(search)) { var term = search.Trim(); query = query.Where(x => EF.Functions.ILike(x.Number, $"%{term}%") || EF.Functions.ILike(x.CustomerName, $"%{term}%")); }
         return await query.OrderByDescending(x => x.OrderDate).ThenBy(x => x.Number).Take(limit).Select(x => new SalesOrderLookup(x.Id, x.Number, x.CustomerName, x.Lines.Select(line => line.ProductId).Distinct().ToList())).ToListAsync(token);
     }

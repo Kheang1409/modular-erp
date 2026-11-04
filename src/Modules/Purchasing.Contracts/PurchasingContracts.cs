@@ -13,6 +13,10 @@ public interface IPurchaseOrderDirectory
     Task<PurchaseOrderReference?> FindAsync(Guid purchaseOrderId, CancellationToken cancellationToken);
     Task<IReadOnlyList<PurchaseOrderLookup>> SearchReceivableAsync(string? search, int limit, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<PurchaseOrderLookup>>([]);
 }
+public interface IPurchaseOrderFulfillmentStatusWriter
+{
+    Task RecordInventoryFulfillmentAsync(Guid purchaseOrderId, bool isComplete, CancellationToken cancellationToken);
+}
 public sealed record PurchaseOrderLookup(Guid Id, string Number, string SupplierName, IReadOnlyList<Guid> ProductIds);
 public sealed record PurchaseSummaryReportRow(string CurrencyCode, int OrderCount, decimal Subtotal, decimal Discount, decimal Tax, decimal Total);
 public interface IPurchasingReportingData { Task<IReadOnlyList<PurchaseSummaryReportRow>> SummaryAsync(DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken); }

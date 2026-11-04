@@ -133,29 +133,36 @@ internal static partial class InventoryWorkflow
         Assert.Equal(0m, consumed.GetProperty("remainingQuantity").GetDecimal());
         await AssertBalanceAsync(page, baseUrl, productId, locations["A"], 5, 0);
 
-        foreach (var request in new[]
+        var insufficientTransfer = MoveRequest(2, productId, 100, locations["A"], locations["B"], date);
+        var draft = await PostAsync(page, baseUrl, "/api/v1/inventory/moves", insufficientTransfer);
+        var api = $"/api/v1/inventory/moves/{draft.GetProperty("id").GetGuid()}";
+        var before = await GetAsync(page, baseUrl, api);
+        var failure = await page.Context.APIRequest.PostAsync(Url(baseUrl, $"{api}/complete"), new()
         {
-            MoveRequest(2, productId, 100, locations["A"], locations["B"], date),
-            MoveRequest(0, productId, 1, locations["SUPPLIER"], locations["A"], date, "PurchaseOrder", purchaseId),
-            MoveRequest(1, productId, 1, locations["A"], locations["CUSTOMER"], date, "SalesOrder", salesId)
-        })
-        {
-            var draft = await PostAsync(page, baseUrl, "/api/v1/inventory/moves", request);
-            var api = $"/api/v1/inventory/moves/{draft.GetProperty("id").GetGuid()}";
-            var before = await GetAsync(page, baseUrl, api);
-            var failure = await page.Context.APIRequest.PostAsync(Url(baseUrl, $"{api}/complete"), new() { DataObject = new { concurrencyStamp = Stamp(draft), idempotencyKey = Guid.NewGuid().ToString("N") } });
-            Assert.Equal(400, failure.Status);
-            Assert.Equal(before.GetRawText(), (await GetAsync(page, baseUrl, api)).GetRawText());
-            await VisitAsync(page, baseUrl, MovePath(draft), draft.GetProperty("number").GetString()!);
-            await page.GetByRole(AriaRole.Button, new() { Name = "Cancel", Exact = true }).ClickAsync();
-            await ExpectStateAsync(page, "Cancelled");
-        }
+            DataObject = new { concurrencyStamp = Stamp(draft), idempotencyKey = Guid.NewGuid().ToString("N") }
+        });
+        Assert.Equal(400, failure.Status);
+        Assert.Equal(before.GetRawText(), (await GetAsync(page, baseUrl, api)).GetRawText());
+        await VisitAsync(page, baseUrl, MovePath(draft), draft.GetProperty("number").GetString()!);
+        await page.GetByRole(AriaRole.Button, new() { Name = "Cancel", Exact = true }).ClickAsync();
+        await ExpectStateAsync(page, "Cancelled");
+
         await AssertBalanceAsync(page, baseUrl, productId, locations["A"], 5, 0);
         await AssertBalanceAsync(page, baseUrl, productId, locations["B"], 4, 0);
         await AssertFulfilledAsync(page, baseUrl, productId, "PurchaseOrder", purchaseId, 10);
         await AssertFulfilledAsync(page, baseUrl, productId, "SalesOrder", salesId, 4);
-        Assert.Equal(documents.Purchase.GetRawText(), (await GetAsync(page, baseUrl, $"/api/v1/purchasing/orders/{purchaseId}")).GetRawText());
-        Assert.Equal(documents.Sales.GetRawText(), (await GetAsync(page, baseUrl, $"/api/v1/sales/orders/{salesId}")).GetRawText());
+        await WaitForOrderStateAsync(page, baseUrl, $"/api/v1/purchasing/orders/{purchaseId}", 4);
+        await WaitForOrderStateAsync(page, baseUrl, $"/api/v1/sales/orders/{salesId}", 3);
+        await AssertCreateRejectedAsync(page, baseUrl,
+            MoveRequest(0, productId, 1, locations["SUPPLIER"], locations["A"], date, "PurchaseOrder", purchaseId));
+        await AssertCreateRejectedAsync(page, baseUrl,
+            MoveRequest(1, productId, 1, locations["A"], locations["CUSTOMER"], date, "SalesOrder", salesId));
+        var fulfilledPurchase = await GetAsync(page, baseUrl, $"/api/v1/purchasing/orders/{purchaseId}");
+        Assert.Equal(4, fulfilledPurchase.GetProperty("state").GetInt32());
+        AssertSameOrderDataExceptFulfillmentState(documents.Purchase, fulfilledPurchase);
+        var fulfilledSales = await GetAsync(page, baseUrl, $"/api/v1/sales/orders/{salesId}");
+        Assert.Equal(3, fulfilledSales.GetProperty("state").GetInt32());
+        AssertSameOrderDataExceptFulfillmentState(documents.Sales, fulfilledSales);
         var balances = await GetAsync(page, baseUrl, $"/api/v1/inventory/balances?productId={productId}&warehouseId={warehouseId}&includeZero=true&sort=location&descending=false&page=1&pageSize=100");
         Assert.Equal(2, balances.GetProperty("total").GetInt32());
         foreach (var balance in balances.GetProperty("items").EnumerateArray())
@@ -429,6 +436,39 @@ internal static partial class InventoryWorkflow
         Assert.True(response.Ok, $"Inventory setup or action returned HTTP {response.Status}.");
         using var json = JsonDocument.Parse(await response.TextAsync());
         return json.RootElement.Clone();
+    }
+
+    private static async Task AssertCreateRejectedAsync(IPage page, string baseUrl, object request)
+    {
+        var response = await page.Context.APIRequest.PostAsync(Url(baseUrl, "/api/v1/inventory/moves"), new()
+        {
+            DataObject = request
+        });
+        Assert.Equal(400, response.Status);
+    }
+
+    private static async Task WaitForOrderStateAsync(IPage page, string baseUrl, string path, int expectedState)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+        JsonElement order;
+        do
+        {
+            order = await GetAsync(page, baseUrl, path);
+            if (order.GetProperty("state").GetInt32() == expectedState) return;
+            await Task.Delay(250);
+        } while (DateTimeOffset.UtcNow < deadline);
+
+        Assert.Equal(expectedState, order.GetProperty("state").GetInt32());
+    }
+
+    private static void AssertSameOrderDataExceptFulfillmentState(JsonElement before, JsonElement after)
+    {
+        foreach (var property in before.EnumerateObject())
+        {
+            if (property.Name is "state" or "updatedAtUtc" or "updatedBy" or "concurrencyStamp") continue;
+            Assert.True(after.TryGetProperty(property.Name, out var actual), $"The order response is missing '{property.Name}'.");
+            Assert.Equal(property.Value.GetRawText(), actual.GetRawText());
+        }
     }
 
     private static string Stamp(JsonElement item) => item.GetProperty("concurrencyStamp").GetString()!;

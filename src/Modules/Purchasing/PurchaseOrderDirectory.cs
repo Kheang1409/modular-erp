@@ -9,7 +9,9 @@ internal sealed class PurchaseOrderDirectory(PurchasingDbContext db) : IPurchase
     public async Task<IReadOnlyList<PurchaseOrderLookup>> SearchReceivableAsync(string? search, int limit, CancellationToken token)
     {
         limit = Math.Clamp(limit, 1, 100);
-        var query = db.PurchaseOrders.AsNoTracking().Where(x => x.State == PurchaseOrderState.Confirmed && !x.IsArchived);
+        var query = db.PurchaseOrders.AsNoTracking()
+            .Where(x => (x.State == PurchaseOrderState.Confirmed || x.State == PurchaseOrderState.PartiallyReceived)
+                && !x.IsArchived);
         if (!string.IsNullOrWhiteSpace(search)) { var term = search.Trim(); query = query.Where(x => EF.Functions.ILike(x.Number, $"%{term}%") || EF.Functions.ILike(x.SupplierName, $"%{term}%")); }
         return await query.OrderByDescending(x => x.OrderDate).ThenBy(x => x.Number).Take(limit).Select(x => new PurchaseOrderLookup(x.Id, x.Number, x.SupplierName, x.Lines.Select(line => line.ProductId).Distinct().ToList())).ToListAsync(token);
     }

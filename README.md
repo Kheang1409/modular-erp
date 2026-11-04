@@ -126,6 +126,11 @@ This is a pre-release community preview, not a production-readiness guarantee. C
 Reporting now adds historical-aging, stable multi-page detail, export-streaming,
 and responsive accessibility regressions. These bounded datasets complement the
 existing ledger performance check; they do not certify production-scale capacity.
+Inventory fulfillment progress now updates Sales and Purchasing order states
+through retry-safe outbox consumers. Partial and complete states are derived from
+the committed movement ledger across all product lines; updates are eventual,
+duplicate-safe, and never reopen cancelled orders. Compensating stock corrections
+do not automatically reverse a business order's fulfillment state.
 Platform currency writes now share their audit transaction and serialize changes
 within each company. Module updates retain the old package until state is saved,
 restore it on recoverable failures, and reject malformed enablement state.
@@ -139,10 +144,12 @@ an eligible-state transition and commits with its audit record. Delivery remains
 at least once; handlers still need idempotent side effects. The additive queue
 lease migration requires a [stop-all-old-workers rollout](docs/deployment/production.md#queue-lease-ownership-upgrade),
 not mixed-version workers against the same database.
-Next release gates are reviewing remaining platform/extension write boundaries,
-production-volume performance and security checks, production-like restore and
-crash/migration recovery, a green complete CI run, and reviewed release notes and
-a version tag. New writable modules must explicitly adopt the shared boundary.
+A review of current built-in write paths found no uncoordinated database/audit
+mutation; external file-storage and module-package filesystem changes remain
+outside the PostgreSQL transaction. Remaining release gates are production-volume
+performance and security checks, production-like restore and crash/migration
+recovery, a green complete CI run, and reviewed release notes and a version tag.
+New writable modules must explicitly adopt the shared boundary.
 Advanced inventory costing, lots/serials, and additional ERP modules remain
 separate future extensions.
 

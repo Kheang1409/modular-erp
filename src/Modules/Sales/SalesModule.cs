@@ -21,6 +21,7 @@ public sealed class SalesModule : IErpModule
             postgres => postgres.MigrationsHistoryTable("__EFMigrationsHistory", "sales")));
         services.AddScoped<IQuotationService, QuotationService>(); services.AddScoped<IQuotationDirectory, QuotationDirectory>();
         services.AddScoped<ISalesOrderService, SalesOrderService>(); services.AddScoped<ISalesOrderDirectory, SalesOrderDirectory>();
+        services.AddScoped<ISalesOrderFulfillmentStatusWriter, SalesOrderFulfillmentStatusWriter>();
         services.AddScoped<ISalesReportingData, SalesReportingData>(); services.AddScoped<IModuleDatabaseInitializer, SalesDatabaseInitializer>();
     }
     public void ConfigureEndpoints(IEndpointRouteBuilder endpoints) => endpoints.MapSalesEndpoints();

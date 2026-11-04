@@ -178,6 +178,12 @@ namespace Erp.Modules.Inventory.Persistence.Migrations
 
                     b.HasIndex("TenantId", "CompanyId", "ProductId", "State");
 
+                    b.HasIndex("TenantId", "CompanyId", "ReferenceDocumentType", "ReferenceDocumentId", "Type", "State", "ProductId")
+                        .HasDatabaseName("IX_stock_moves_fulfillment_lookup")
+                        .HasAnnotation("Npgsql:CreatedConcurrently", true);
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("TenantId", "CompanyId", "ReferenceDocumentType", "ReferenceDocumentId", "Type", "State", "ProductId"), new[] { "Quantity" });
+
                     b.ToTable("stock_moves", "inventory", t =>
                         {
                             t.HasCheckConstraint("CK_stock_moves_quantity", "\"Quantity\">0");

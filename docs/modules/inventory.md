@@ -8,7 +8,7 @@ Completion revalidates the current location types, is optimistic-concurrency pro
 
 The module reads product, sales-order, and purchase-order state through their public contract assemblies. It never reads or writes another module's schema. Events are published for reservations and completed receipts, shipments, transfers, and adjustments.
 
-API routes are under `/api/v1/inventory`; Swagger documents warehouses, locations, bounded source-document lookup, searchable location/warehouse balance summaries, moves, atomic multi-line movement batches, and reservations. Source-document lookup uses the Sales and Purchasing public directory contracts and returns only confirmed, company-scoped documents with their eligible products. Batch creation validates every line before persisting any draft, while the immutable ledger continues to store one movement per product line. The Blazor pages support balance reconciliation, movement listing, type-aware draft creation, searchable Purchase Order and Sales Order selectors, completion/correction, detail, warehouse/location administration, source-document fulfillment, and reservation lifecycle visibility. Lot/serial tracking, costing, picking waves, and CSV operations are future extensions.
+API routes are under `/api/v1/inventory`; Swagger documents warehouses, locations, bounded source-document lookup, searchable location/warehouse balance summaries, moves, atomic multi-line movement batches, and reservations. Source-document lookup uses the Sales and Purchasing public directory contracts and returns confirmed or partially fulfilled, company-scoped documents with their eligible products. Batch creation validates every line before persisting any draft, while the immutable ledger continues to store one movement per product line. The Blazor pages support balance reconciliation, movement listing, type-aware draft creation, searchable Purchase Order and Sales Order selectors, completion/correction, detail, warehouse/location administration, source-document fulfillment, and reservation lifecycle visibility. Lot/serial tracking, costing, picking waves, and CSV operations are future extensions.
 
 ## Audit consistency
 
@@ -41,11 +41,21 @@ draft compensating movement that must itself be completed.
 Product and source-order facts remain behind public contracts. Reads on the shared
 connection must be sequential. The nine existing Inventory event names/payloads,
 permissions, schema, quantity rules, and location matrix are unchanged. Fulfillment
-messages report movement progress; this change does not introduce an automatic
-Sales/Purchasing state-update consumer. Outbox delivery remains at least once and
-does not make consumer effects atomic with the ledger or guarantee legal gapless
-numbering. Accounting also enlists its own workflows; this does not create a new
-automatic stock-costing or Inventory-to-ledger posting integration.
+progress consumers recompute document completion from the committed Inventory
+ledger across all product lines, then update Sales/Purchasing through their public
+contracts. Outbox delivery is at least once; consumers are idempotent and states
+advance monotonically, so delayed messages cannot downgrade a completed or
+cancelled order. Corrections do not automatically reopen orders. These asynchronous
+updates are not atomic with the Inventory transaction. Accounting also enlists its
+own workflows; this does not create automatic stock costing or Inventory-to-ledger
+posting.
+
+The source-document ledger aggregate uses the covering
+`IX_stock_moves_fulfillment_lookup` index. Its migration creates the index
+concurrently so existing movement writes are not blocked for the duration of the
+index build. The PostgreSQL performance regression test seeds 100,001 synthetic
+rows and compares the aggregate plan before and after the index; treat those
+measurements as a query-plan check, not as a production-capacity guarantee.
 
 Movement, balance, reservation, warehouse, and location tables use named keyboard-focusable scroll
 regions to keep populated wide tables contained on mobile. Navigating from a

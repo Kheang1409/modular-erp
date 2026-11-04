@@ -20,6 +20,10 @@ public interface ISalesOrderDirectory
     Task<SalesOrderReference?> FindAsync(Guid salesOrderId, CancellationToken cancellationToken);
     Task<IReadOnlyList<SalesOrderLookup>> SearchFulfillableAsync(string? search, int limit, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<SalesOrderLookup>>([]);
 }
+public interface ISalesOrderFulfillmentStatusWriter
+{
+    Task RecordInventoryFulfillmentAsync(Guid salesOrderId, bool isComplete, CancellationToken cancellationToken);
+}
 public sealed record SalesOrderLookup(Guid Id, string Number, string CustomerName, IReadOnlyList<Guid> ProductIds);
 public sealed record SalesSummaryReportRow(string CurrencyCode, int OrderCount, decimal Subtotal, decimal Discount, decimal Tax, decimal Total);
 public sealed record SalesByCustomerReportRow(Guid CustomerId, string CustomerName, string CurrencyCode, int OrderCount, decimal Total);

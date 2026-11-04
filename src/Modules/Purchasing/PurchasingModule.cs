@@ -19,6 +19,7 @@ public sealed class PurchasingModule : IErpModule
             provider.GetRequiredService<IRelationalDatabaseSession>().Connection,
             postgres => postgres.MigrationsHistoryTable("__EFMigrationsHistory", "purchasing")));
         s.AddScoped<IPurchaseOrderService, PurchaseOrderService>(); s.AddScoped<IPurchaseOrderDirectory, PurchaseOrderDirectory>();
+        s.AddScoped<IPurchaseOrderFulfillmentStatusWriter, PurchaseOrderFulfillmentStatusWriter>();
         s.AddScoped<IPurchasingReportingData, PurchasingReportingData>(); s.AddScoped<IModuleDatabaseInitializer, PurchasingDatabaseInitializer>();
     }
     public void ConfigureEndpoints(IEndpointRouteBuilder e) => e.MapPurchasingEndpoints(); public void ConfigureIntegrationEvents(IIntegrationEventRegistry e) { e.Add<PurchaseOrderConfirmedEvent>("purchasing.purchase_order.confirmed.v1"); e.Add<PurchaseOrderCancelledEvent>("purchasing.purchase_order.cancelled.v1"); e.Add<GoodsReceiptRequestedEvent>("purchasing.goods_receipt.requested.v1"); }

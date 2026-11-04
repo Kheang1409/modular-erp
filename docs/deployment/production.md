@@ -23,6 +23,31 @@ Back up first, deploy the new artifact, run reviewed migrations once, then start
 
 For rolling deployments, additive schema changes must land before code that requires them. Remove old columns only in a later release after every old instance is gone. Preserve Data Protection keys across instances so authentication cookies remain readable.
 
+The Inventory fulfillment lookup migration builds
+`inventory."IX_stock_moves_fulfillment_lookup"` with `CREATE INDEX CONCURRENTLY`.
+This avoids holding the normal table-level write-blocking lock during the build,
+but it is non-transactional and can leave an invalid index if interrupted. Before
+retrying a failed migration, check both `inventory."__EFMigrationsHistory"` and
+the index catalog (`pg_index.indisvalid`/`indisready`). If the migration is not
+recorded and the named index remains, preserve the migration logs, drop only that
+index with `DROP INDEX CONCURRENTLY` in autocommit mode, then rerun the reviewed
+migration. If the migration is recorded but the index is invalid, stop rollout
+and repair it through a reviewed database change; do not mark the deployment
+healthy or edit migration history by hand.
+
+```sql
+SELECT migration."MigrationId"
+FROM inventory."__EFMigrationsHistory" AS migration
+WHERE migration."MigrationId" = '20261025032105_FulfillmentLookup';
+
+SELECT index_class.relname, index_state.indisready, index_state.indisvalid
+FROM pg_index AS index_state
+JOIN pg_class AS index_class ON index_class.oid = index_state.indexrelid
+JOIN pg_namespace AS index_schema ON index_schema.oid = index_class.relnamespace
+WHERE index_schema.nspname = 'inventory'
+  AND index_class.relname = 'IX_stock_moves_fulfillment_lookup';
+```
+
 ### Queue lease ownership upgrade
 
 `20261021143000_QueueLeaseOwnership` adds nullable UUID `LeaseId` columns to
@@ -57,6 +82,94 @@ alone is not a guarantee of safe mixed-version queue behavior.
 Never restore production Data Protection keys or customer data into an environment accessible to unauthorized staff.
 
 CI performs a logical PostgreSQL backup and restores it into a separate database, then verifies representative Platform, Inventory, and Accounting structures. This catches basic backup incompatibility but does not replace the environment-specific drill above: operators must also prove attachment, key, module-package, credential, DNS, capacity, recovery-time, and recovery-point procedures in an isolated production-like environment.
+
+### Disposable local recovery rehearsal
+
+Run `.\eng\rehearse-recovery.ps1` from the repository root on a Windows host with
+Docker Compose, the .NET 10 SDK, and Playwright Chromium available. The script
+uses synthetic credentials, loopback-only published ports, and randomly named
+Compose projects. Before starting, it refuses project labels that already own
+Docker volumes, containers, or networks. It creates one synthetic source
+installation and two independent fresh
+restore targets, then removes only those uniquely labeled Compose projects and
+its temporary work directory. Do not alter the script to point it at a shared or
+production Compose project.
+This is a functional test harness, not a protected backup system: its temporary
+synthetic dump and asset copy are not encrypted and are removed at exit. Never
+use it with production data or treat its temporary files as retained backups.
+
+The rehearsal creates synthetic business activity and an attachment, installs
+the sample external module, backs up PostgreSQL plus the four persistent
+application directories, and restores that set to both fresh targets. The
+custom-format dump is checked with `pg_restore --list`, and a separate
+intentionally truncated copy must be rejected by that verifier. The restored
+targets are started with the current image, which runs the configured
+migration check; the script verifies the expected migration history, authenticated
+tenant/company context using the source session cookie, attachment bytes, module
+state and endpoint, and fulfillment outbox replay without adding an audit record.
+It then runs the critical browser workflow—including its multi-company isolation
+checks—against the first restore. The script
+prints elapsed seconds for source setup/workflow, backup, each restore, and the
+overall rehearsal. These local synthetic timings are not production RTO/RPO
+measurements; the rehearsal does not measure data loss since a backup point.
+
+| Recovery resource | Authoritative source and coverage | Restore and verification |
+| --- | --- | --- |
+| PostgreSQL application data, tenant/company identities, user records, module metadata, audit history, jobs, and outbox | PostgreSQL; the rehearsal uses `pg_dump --format=custom` | `pg_restore --exit-on-error` into a new isolated PostgreSQL volume; application readiness, migration history, tenant/company context, and fulfillment replay/audit count are checked |
+| Attachment metadata | PostgreSQL | Restored with the database; authenticated download is verified against the original synthetic file's SHA-256 |
+| Local attachment bytes | `/var/erp/files` volume when `FileStorage:Provider=Local` | Copy the volume contents into the fresh target before application start; authenticated download verifies the restored object |
+| Data Protection key ring | `/var/erp/keys`; keep the same configured application name (`OpenErp`) | Copy keys before starting the restored application; the rehearsal reuses the source authentication cookie, verifying it without logging in again |
+| Installed external modules and `modules.state.json` | `/var/erp/modules`; package versions and enabled state are filesystem assets, while module metadata is also in PostgreSQL | Restore the entire directory; startup package validation/loading and the sample module API are verified |
+| Trusted module publisher public keys | `/var/erp/trusted-publishers` | Restore alongside module packages and retain the configured signature policy; the local sample uses the explicitly synthetic development policy, not production trust material |
+| Deployment settings and secret references | External deployment configuration/secret provider; not in the database or rehearsal backup | Re-provision from the approved secret manager and deployment configuration. Validate database/object-storage credentials, signing policy, scanner, endpoints, TLS/proxy and host settings without putting secret values in the backup |
+| S3-compatible object data, if configured instead of local files | External object-storage bucket and its lifecycle/versioning policy | Restore or reattach the corresponding bucket and credentials; verify object availability and metadata association. The local rehearsal uses filesystem storage and does not validate an external S3 recovery |
+| Malware scanning, DNS/TLS, proxy, SMTP, telemetry collector, and other external services | External service owners and their independent backup/configuration processes | Restore service access/configuration separately and verify connectivity and security policy. These are not simulated by the local rehearsal |
+
+For an operational rehearsal, record the release/image identifier and synchronized
+backup timestamps for PostgreSQL and every asset store. Stop writes or use a
+coordinated snapshot before collecting database and filesystem backups; the
+local script does not create a cross-resource point-in-time snapshot under
+concurrent production writes. Retain and protect backup encryption keys outside
+the backup set. Record start/end criteria, elapsed phases, backup age, known
+data loss, manual actions, and external dependencies. Establish production RPO
+and RTO only from a production-like, authorized rehearsal with the actual
+backup, storage, network, secret-provider, and restore-throughput configuration.
+
+#### Local rehearsal record
+
+The full command `.\eng\rehearse-recovery.ps1` completed successfully on
+2026-10-25 using Windows, Docker 29.9.2, Compose 5.6.1, and .NET SDK 10.0.113.
+It created one synthetic source, restored the database and assets into two fresh
+targets, and ran the critical Playwright workflow once against the source and
+once against the first restore (both 1 passed, 0 failed). The source workflow
+covered Sales, Purchasing, Inventory, Accounting, and multi-company boundaries.
+The authenticated source cookie remained valid on both restores; the synthetic
+attachment hash matched; the sample module loaded; the expected Inventory
+migration was recorded; and replay of one pending fulfillment event did not
+increase its Sales audit count. A truncated copy of the PostgreSQL archive was
+rejected by `pg_restore --list`.
+
+The recorded backup completed at `2026-10-25T05:05:35Z`. Timings are seconds:
+
+| Phase | Fresh target 1 | Fresh target 2 |
+| --- | ---: | ---: |
+| PostgreSQL startup and archive restore | 34.86 | 54.34 |
+| ERP container preparation and persistent-asset copy | 104.75 | 427.87 |
+| Application startup, readiness, and recovery validation | 16.20 | 9.54 |
+| Fulfillment replay and audit-count verification (included in validation) | 0.71 | 0.72 |
+| Restore to verified application | 155.82 | 491.75 |
+| Backup age at verification | 156.19 | 647.94 |
+
+The post-restore browser workflow took 197.43 seconds. Source setup and its
+pre-backup workflow took 654.94 seconds, backup capture took 4.13 seconds, and
+the entire command took 1509.18 seconds. Asset-stage timing includes `docker
+compose create erp` and any image/container preparation as well as copying the
+assets; it is not a filesystem-copy-only benchmark. No post-backup writes or
+simulated data loss were introduced, so data-loss volume and RPO were not
+measured. These local timings include Docker Desktop behavior and synthetic
+data only; neither the restore time nor the observed backup age establishes a
+production RTO or RPO. The script’s startup/readiness and validation time is
+reported as one combined phase, not as separate sub-timings.
 
 ## Monitoring and alerts
 

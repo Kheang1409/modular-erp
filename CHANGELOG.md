@@ -4,6 +4,7 @@ All notable changes are documented here. The project follows semantic versioning
 
 ## 0.1.0 - unreleased
 
+- Connected Inventory fulfillment progress to retry-safe Sales and Purchasing status updates; derive whole-order completion across product lines, expose partial orders for continued fulfillment, keep cancellation terminal, and test audit rollback/replay against PostgreSQL.
 - Fenced outbox/job success and failure updates with fresh per-claim GUID lease IDs, active state, and tenant/company identity; ignored superseded results without falsely logging accepted completion or failure.
 - Made dead-letter replay conditional and atomic with audit through the shared PostgreSQL coordinator, preserving caller-owned outer transactions, no-op completion, retry counters, permissions, and at-least-once delivery contracts.
 - Added nullable queue lease columns with an additive migration and documented stop-all-old-workers rollout, legacy-lease recovery, and unchanged handler idempotency requirements.

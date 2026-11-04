@@ -4,7 +4,7 @@ Purchasing owns tenant/company-scoped purchase orders and lines in the `purchasi
 
 Suppliers and purchasing product facts are resolved only through public Contacts and Products contracts. The server calculates all totals with decimal arithmetic and issues `PO-{yyyy}-######` document numbers through the platform sequence service.
 
-Draft orders are editable. They may be sent, confirmed, or cancelled; sent orders may be confirmed or cancelled. Confirmation publishes `purchasing.purchase_order.confirmed.v1` and `purchasing.goods_receipt.requested.v1`; cancellation publishes `purchasing.purchase_order.cancelled.v1`. Partially received and received states are reserved for Inventory integration. Optimistic concurrency, audit history, archive restrictions, search, sorting, paging, API authorization, and Blazor workflows are included.
+Draft orders are editable. They may be sent, confirmed, or cancelled; sent orders may be confirmed or cancelled. Confirmation publishes `purchasing.purchase_order.confirmed.v1` and `purchasing.goods_receipt.requested.v1`; cancellation publishes `purchasing.purchase_order.cancelled.v1`. Completed Inventory receipts advance confirmed orders to partially received and then received once every ordered product quantity is received. These updates are asynchronous through the outbox, are safe to retry, and do not reopen cancelled orders. Partially received orders remain available for further receipts. Optimistic concurrency, audit history, archive restrictions, search, sorting, paging, API authorization, and Blazor workflows are included.
 
 ## Audit consistency
 

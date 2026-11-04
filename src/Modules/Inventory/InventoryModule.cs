@@ -4,6 +4,8 @@ using Erp.Abstractions.Events;
 using Erp.Abstractions.Modules;
 using Erp.Abstractions.Persistence;
 using Erp.Modules.Inventory.Contracts;
+using Erp.Modules.Purchasing.Contracts;
+using Erp.Modules.Sales.Contracts;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
@@ -21,6 +23,11 @@ public sealed class InventoryModule : IErpModule
             postgres => postgres.MigrationsHistoryTable("__EFMigrationsHistory", "inventory")));
         s.AddScoped<IInventoryService, InventoryService>(); s.AddScoped<IStockAvailability, StockAvailability>();
         s.AddScoped<IInventoryReportingData, InventoryReportingData>(); s.AddScoped<IModuleDatabaseInitializer, InventoryDatabaseInitializer>();
+        s.AddScoped<InventoryFulfillmentStatusConsumer>();
+        s.AddScoped<IIntegrationEventConsumer<PurchaseOrderFulfillmentProgressEvent>>(provider =>
+            provider.GetRequiredService<InventoryFulfillmentStatusConsumer>());
+        s.AddScoped<IIntegrationEventConsumer<SalesOrderFulfillmentProgressEvent>>(provider =>
+            provider.GetRequiredService<InventoryFulfillmentStatusConsumer>());
     }
     public void ConfigureEndpoints(IEndpointRouteBuilder e) => e.MapInventoryEndpoints();
     public void ConfigurePermissions(IPermissionRegistry p) { p.Add(new(InventoryPermissions.Read, "View inventory", Manifest.Id)); p.Add(new(InventoryPermissions.Configure, "Configure warehouses", Manifest.Id)); p.Add(new(InventoryPermissions.Manage, "Manage stock moves", Manifest.Id)); p.Add(new(InventoryPermissions.Complete, "Complete stock moves", Manifest.Id)); p.Add(new(InventoryPermissions.Reserve, "Reserve stock", Manifest.Id)); p.Add(new(InventoryPermissions.Adjust, "Adjust stock", Manifest.Id)); }

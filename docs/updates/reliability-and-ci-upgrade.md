@@ -367,10 +367,14 @@ successful save; rendered headings and persisted-state assertions remain in plac
 
 ## What remains before a production release
 
-The next steps are reviewing remaining platform/extension write boundaries,
-measuring production-volume performance beyond the bounded reporting fixtures, completing security
-and recovery verification, and proving crash/migration recovery beyond caught
-package-operation failures.
+The current built-in platform and module write paths have been reviewed for
+database/audit/outbox consistency; external file-storage and module-package
+filesystem effects remain outside PostgreSQL transactions. Inventory progress
+now drives retry-safe Sales and Purchasing fulfillment states from the committed
+movement ledger, without reopening cancelled orders. Remaining steps are
+measuring production-volume performance beyond the bounded reporting fixtures,
+completing security and recovery verification, and proving crash/migration
+recovery beyond caught package-operation failures.
 A complete green CI run and reviewed release notes and version tag remain release
 gates. Production deployments also need their own HTTPS, secret management,
 least-privilege access, malware scanner, and full backup/restore rehearsal.

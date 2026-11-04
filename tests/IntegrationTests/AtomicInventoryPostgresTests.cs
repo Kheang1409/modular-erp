@@ -1,4 +1,5 @@
 using System.Data.Common;
+using System.Globalization;
 using System.Security.Claims;
 using System.Text.Json;
 using Erp.Abstractions.Auditing;
@@ -17,7 +18,9 @@ using Erp.Modules.Contacts;
 using Erp.Modules.Inventory;
 using Erp.Modules.Products;
 using Erp.Modules.Purchasing;
+using Erp.Modules.Purchasing.Contracts;
 using Erp.Modules.Sales;
+using Erp.Modules.Sales.Contracts;
 using Erp.SharedKernel;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -26,12 +29,402 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Testcontainers.PostgreSql;
+using Xunit.Abstractions;
 
 namespace Erp.IntegrationTests;
 
-public sealed class AtomicInventoryPostgresTests(AtomicInventoryPostgresFixture fixture)
+public sealed class AtomicInventoryPostgresTests(
+    AtomicInventoryPostgresFixture fixture,
+    ITestOutputHelper output)
     : IClassFixture<AtomicInventoryPostgresFixture>
 {
+    [Fact]
+    public async Task PurchaseOrderProgressUsesAllProductLinesAndAllowsFurtherPartialReceipts()
+    {
+        await using var scope = await TestScope.CreateAsync(fixture.ConnectionString);
+        var firstReceipt = await PrepareMutation(scope, "receipt-full");
+        await firstReceipt.Execute(CancellationToken.None);
+
+        var consumer = scope.ServiceProvider
+            .GetRequiredService<IIntegrationEventConsumer<PurchaseOrderFulfillmentProgressEvent>>();
+        var context = EventContext(scope);
+        var firstProgress = new PurchaseOrderFulfillmentProgressEvent(
+            Guid.NewGuid(), FixedClock.Now, scope.PurchaseOrderId, scope.ProductA.Id, 50, 50, true);
+        await consumer.HandleAsync(firstProgress, context, CancellationToken.None);
+
+        await using (var reader = scope.ReadPurchasing())
+        {
+            Assert.Equal(PurchaseOrderState.PartiallyReceived,
+                await reader.PurchaseOrders.Where(item => item.Id == scope.PurchaseOrderId)
+                    .Select(item => item.State).SingleAsync());
+        }
+        var receivable = await scope.ServiceProvider.GetRequiredService<IPurchaseOrderDirectory>()
+            .SearchReceivableAsync(null, 10, CancellationToken.None);
+        Assert.Contains(receivable, item => item.Id == scope.PurchaseOrderId);
+
+        var secondReceipt = await scope.Inventory.CreateAsync(
+            new(StockMoveType.Receipt, scope.ProductB.Id, 3, scope.Supplier.Id, scope.InternalA.Id,
+                BusinessDate, "PurchaseOrder", scope.PurchaseOrderId),
+            CancellationToken.None);
+        await scope.Inventory.CompleteAsync(secondReceipt.Id,
+            new(secondReceipt.ConcurrencyStamp, "purchase-order-final-receipt"), CancellationToken.None);
+        await consumer.HandleAsync(new PurchaseOrderFulfillmentProgressEvent(
+            Guid.NewGuid(), FixedClock.Now, scope.PurchaseOrderId, scope.ProductB.Id, 3, 3, true),
+            context, CancellationToken.None);
+
+        await using var finalReader = scope.ReadPurchasing();
+        Assert.Equal(PurchaseOrderState.Received,
+            await finalReader.PurchaseOrders.Where(item => item.Id == scope.PurchaseOrderId)
+                .Select(item => item.State).SingleAsync());
+    }
+
+    [Fact]
+    public async Task SalesOrderProgressUsesAllProductLinesAndKeepsCancellationTerminal()
+    {
+        await using var scope = await TestScope.CreateAsync(fixture.ConnectionString);
+        var firstDelivery = await PrepareMutation(scope, "delivery-full");
+        await firstDelivery.Execute(CancellationToken.None);
+
+        var consumer = scope.ServiceProvider
+            .GetRequiredService<IIntegrationEventConsumer<SalesOrderFulfillmentProgressEvent>>();
+        var context = EventContext(scope);
+        var firstProgress = new SalesOrderFulfillmentProgressEvent(
+            Guid.NewGuid(), FixedClock.Now, scope.SalesOrderId, scope.ProductA.Id, 4, 4, true);
+        await consumer.HandleAsync(firstProgress, context, CancellationToken.None);
+
+        await using (var reader = scope.ReadSales())
+        {
+            Assert.Equal(SalesOrderState.PartiallyFulfilled,
+                await reader.SalesOrders.Where(item => item.Id == scope.SalesOrderId)
+                    .Select(item => item.State).SingleAsync());
+        }
+
+        var fulfillable = await scope.ServiceProvider.GetRequiredService<ISalesOrderDirectory>()
+            .SearchFulfillableAsync(null, 10, CancellationToken.None);
+        Assert.Contains(fulfillable, item => item.Id == scope.SalesOrderId);
+
+        scope.Database.StockMoves.Add(new StockMove
+        {
+            Id = Guid.NewGuid(),
+            TenantId = scope.TenantId,
+            CompanyId = scope.CompanyId,
+            Number = "OPENING-B",
+            Type = StockMoveType.Adjustment,
+            State = StockMoveState.Completed,
+            ProductId = scope.ProductB.Id,
+            ProductSku = scope.ProductB.Sku,
+            UnitCode = scope.ProductB.SalesUnitCode,
+            Quantity = 2,
+            DestinationLocationId = scope.InternalA.Id,
+            BusinessDate = BusinessDate,
+            CreatedAtUtc = FixedClock.Now,
+            CompletedAtUtc = FixedClock.Now,
+            ConcurrencyStamp = Stamp()
+        });
+        await scope.Database.SaveChangesAsync();
+        await scope.Inventory.ReserveAsync(
+            new(scope.ProductB.Id, scope.InternalA.Id, 2, "reserve-product-b", "SalesOrder", scope.SalesOrderId),
+            CancellationToken.None);
+        var secondDelivery = await scope.Inventory.CreateAsync(
+            new(StockMoveType.Delivery, scope.ProductB.Id, 2, scope.InternalA.Id, scope.Customer.Id,
+                BusinessDate, "SalesOrder", scope.SalesOrderId),
+            CancellationToken.None);
+        await scope.Inventory.CompleteAsync(secondDelivery.Id,
+            new(secondDelivery.ConcurrencyStamp, "sales-order-final-delivery"), CancellationToken.None);
+        await consumer.HandleAsync(new SalesOrderFulfillmentProgressEvent(
+            Guid.NewGuid(), FixedClock.Now, scope.SalesOrderId, scope.ProductB.Id, 2, 2, true),
+            context, CancellationToken.None);
+
+        await using (var finalReader = scope.ReadSales())
+        {
+            Assert.Equal(SalesOrderState.Fulfilled,
+                await finalReader.SalesOrders.Where(item => item.Id == scope.SalesOrderId)
+                    .Select(item => item.State).SingleAsync());
+        }
+        await consumer.HandleAsync(firstProgress, context, CancellationToken.None);
+        await using var replayReader = scope.ReadSales();
+        Assert.Equal(SalesOrderState.Fulfilled,
+            await replayReader.SalesOrders.Where(item => item.Id == scope.SalesOrderId)
+                .Select(item => item.State).SingleAsync());
+    }
+
+    [Fact]
+    public async Task ConcurrentSalesFulfillmentCannotOverwriteCancellationAndRetryIsIdempotent()
+    {
+        await using var scope = await TestScope.CreateAsync(fixture.ConnectionString);
+        var gate = new FulfillmentSaveGate();
+        await using var fulfillmentScope = scope.CreatePeer(gate);
+        await using var cancellationScope = scope.CreatePeer();
+        gate.BlockNext(scope.SalesOrderId, nameof(SalesOrderState.PartiallyFulfilled));
+
+        var staleFulfillment = fulfillmentScope.ServiceProvider
+            .GetRequiredService<ISalesOrderFulfillmentStatusWriter>()
+            .RecordInventoryFulfillmentAsync(scope.SalesOrderId, false, CancellationToken.None);
+        await gate.Blocked.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        try
+        {
+            var order = await cancellationScope.Sales.SalesOrders.AsNoTracking()
+                .SingleAsync(item => item.Id == scope.SalesOrderId);
+            await cancellationScope.ServiceProvider.GetRequiredService<ISalesOrderService>()
+                .TransitionAsync(order.Id, SalesOrderState.Cancelled, order.ConcurrencyStamp, CancellationToken.None);
+        }
+        finally
+        {
+            gate.Release.TrySetResult();
+        }
+
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => staleFulfillment);
+
+        await fulfillmentScope.ServiceProvider.GetRequiredService<ISalesOrderFulfillmentStatusWriter>()
+            .RecordInventoryFulfillmentAsync(scope.SalesOrderId, false, CancellationToken.None);
+
+        await using var reader = scope.ReadSales();
+        Assert.Equal(SalesOrderState.Cancelled,
+            await reader.SalesOrders.Where(item => item.Id == scope.SalesOrderId)
+                .Select(item => item.State).SingleAsync());
+        await using var platform = scope.ReadPlatform();
+        Assert.Equal(1, await platform.AuditLogs.CountAsync(item =>
+            item.CompanyId == scope.CompanyId
+            && item.EntityId == scope.SalesOrderId.ToString()
+            && item.Action == "sales.order.cancelled"));
+        Assert.Equal(0, await platform.AuditLogs.CountAsync(item =>
+            item.CompanyId == scope.CompanyId
+            && item.EntityId == scope.SalesOrderId.ToString()
+            && item.Action == "sales.order.fulfillment_updated"));
+    }
+
+    [Fact]
+    public async Task ConcurrentPartialSalesProgressCannotDowngradeCompletionAndRetryIsIdempotent()
+    {
+        await using var scope = await TestScope.CreateAsync(fixture.ConnectionString);
+        var gate = new FulfillmentSaveGate();
+        await using var partialScope = scope.CreatePeer(gate);
+        await using var completionScope = scope.CreatePeer();
+        gate.BlockNext(scope.SalesOrderId, nameof(SalesOrderState.PartiallyFulfilled));
+
+        var stalePartial = partialScope.ServiceProvider
+            .GetRequiredService<ISalesOrderFulfillmentStatusWriter>()
+            .RecordInventoryFulfillmentAsync(scope.SalesOrderId, false, CancellationToken.None);
+        await gate.Blocked.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        try
+        {
+            await completionScope.ServiceProvider.GetRequiredService<ISalesOrderFulfillmentStatusWriter>()
+                .RecordInventoryFulfillmentAsync(scope.SalesOrderId, true, CancellationToken.None);
+        }
+        finally
+        {
+            gate.Release.TrySetResult();
+        }
+
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => stalePartial);
+
+        await partialScope.ServiceProvider.GetRequiredService<ISalesOrderFulfillmentStatusWriter>()
+            .RecordInventoryFulfillmentAsync(scope.SalesOrderId, false, CancellationToken.None);
+
+        await using var reader = scope.ReadSales();
+        Assert.Equal(SalesOrderState.Fulfilled,
+            await reader.SalesOrders.Where(item => item.Id == scope.SalesOrderId)
+                .Select(item => item.State).SingleAsync());
+        await using var platform = scope.ReadPlatform();
+        Assert.Equal(1, await platform.AuditLogs.CountAsync(item =>
+            item.CompanyId == scope.CompanyId
+            && item.EntityId == scope.SalesOrderId.ToString()
+            && item.Action == "sales.order.fulfillment_updated"));
+    }
+
+    [Fact]
+    public async Task ConcurrentPartialReceiptCannotDowngradePurchaseCompletionAndRetryIsIdempotent()
+    {
+        await using var scope = await TestScope.CreateAsync(fixture.ConnectionString);
+        var gate = new FulfillmentSaveGate();
+        await using var partialScope = scope.CreatePeer(gate);
+        await using var completionScope = scope.CreatePeer();
+        gate.BlockNext(scope.PurchaseOrderId, nameof(PurchaseOrderState.PartiallyReceived));
+
+        var stalePartial = partialScope.ServiceProvider
+            .GetRequiredService<IPurchaseOrderFulfillmentStatusWriter>()
+            .RecordInventoryFulfillmentAsync(scope.PurchaseOrderId, false, CancellationToken.None);
+        await gate.Blocked.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        try
+        {
+            await completionScope.ServiceProvider.GetRequiredService<IPurchaseOrderFulfillmentStatusWriter>()
+                .RecordInventoryFulfillmentAsync(scope.PurchaseOrderId, true, CancellationToken.None);
+        }
+        finally
+        {
+            gate.Release.TrySetResult();
+        }
+
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => stalePartial);
+
+        await partialScope.ServiceProvider.GetRequiredService<IPurchaseOrderFulfillmentStatusWriter>()
+            .RecordInventoryFulfillmentAsync(scope.PurchaseOrderId, false, CancellationToken.None);
+
+        await using var reader = scope.ReadPurchasing();
+        Assert.Equal(PurchaseOrderState.Received,
+            await reader.PurchaseOrders.Where(item => item.Id == scope.PurchaseOrderId)
+                .Select(item => item.State).SingleAsync());
+        await using var platform = scope.ReadPlatform();
+        Assert.Equal(1, await platform.AuditLogs.CountAsync(item =>
+            item.CompanyId == scope.CompanyId
+            && item.EntityId == scope.PurchaseOrderId.ToString()
+            && item.Action == "purchasing.purchase_order.fulfillment_updated"));
+    }
+
+    [Fact]
+    [Trait("Category", "Performance")]
+    public async Task FulfillmentLedgerLookupUsesSelectiveIndexAtProductionLikeVolume()
+    {
+        await using var scope = await TestScope.CreateAsync(fixture.ConnectionString);
+        await using var connection = new NpgsqlConnection(fixture.ConnectionString);
+        await connection.OpenAsync();
+        const string indexName = "IX_stock_moves_fulfillment_lookup";
+        await ExecuteSqlAsync(connection, $"DROP INDEX inventory.\"{indexName}\"");
+        try
+        {
+            await using (var seed = new NpgsqlCommand("""
+                INSERT INTO inventory.stock_moves
+                    ("Id", "TenantId", "CompanyId", "Number", "Type", "State", "ProductId",
+                     "ProductSku", "UnitCode", "Quantity", "BusinessDate", "CreatedAtUtc", "ConcurrencyStamp")
+                SELECT gen_random_uuid(), @tenant, @company, 'PERF-' || series, 'Adjustment',
+                    'Completed', @product, 'PERF-SKU', 'EA', 1, DATE '2026-10-18',
+                    CURRENT_TIMESTAMP, 'performance-seed'
+                FROM generate_series(1, 100000) AS series
+                """, connection))
+            {
+                seed.Parameters.AddWithValue("tenant", scope.TenantId);
+                seed.Parameters.AddWithValue("company", scope.CompanyId);
+                seed.Parameters.AddWithValue("product", scope.ProductA.Id);
+                Assert.Equal(100000, await seed.ExecuteNonQueryAsync());
+            }
+
+            await using (var target = new NpgsqlCommand("""
+                INSERT INTO inventory.stock_moves
+                    ("Id", "TenantId", "CompanyId", "Number", "Type", "State", "ProductId",
+                     "ProductSku", "UnitCode", "Quantity", "ReferenceDocumentType",
+                     "ReferenceDocumentId", "BusinessDate", "CreatedAtUtc", "CompletedAtUtc",
+                     "ConcurrencyStamp")
+                VALUES (@id, @tenant, @company, 'PERF-TARGET', 'Receipt', 'Completed', @product,
+                    'PERF-SKU', 'EA', 45, 'PurchaseOrder', @document, DATE '2026-10-18',
+                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'performance-target')
+                """, connection))
+            {
+                target.Parameters.AddWithValue("id", Guid.NewGuid());
+                target.Parameters.AddWithValue("tenant", scope.TenantId);
+                target.Parameters.AddWithValue("company", scope.CompanyId);
+                target.Parameters.AddWithValue("product", scope.ProductA.Id);
+                target.Parameters.AddWithValue("document", scope.PurchaseOrderId);
+                Assert.Equal(1, await target.ExecuteNonQueryAsync());
+            }
+
+            await ExecuteSqlAsync(connection, "ANALYZE inventory.stock_moves");
+            var query = $"""
+                EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT)
+                SELECT "ProductId", SUM("Quantity")
+                FROM inventory.stock_moves
+                WHERE "TenantId" = '{scope.TenantId}'::uuid
+                    AND "CompanyId" = '{scope.CompanyId}'::uuid
+                    AND "ReferenceDocumentType" = 'PurchaseOrder'
+                    AND "ReferenceDocumentId" = '{scope.PurchaseOrderId}'::uuid
+                    AND "Type" = 'Receipt'
+                    AND "State" = 'Completed'
+                GROUP BY "ProductId"
+                """;
+            var baseline = await MeasurePlanAsync(connection, query);
+            await ExecuteSqlAsync(connection, """
+                CREATE INDEX "IX_stock_moves_fulfillment_lookup"
+                ON inventory.stock_moves
+                    ("TenantId", "CompanyId", "ReferenceDocumentType", "ReferenceDocumentId",
+                     "Type", "State", "ProductId")
+                INCLUDE ("Quantity")
+                """);
+            await ExecuteSqlAsync(connection, "ANALYZE inventory.stock_moves");
+            var indexed = await MeasurePlanAsync(connection, query);
+
+            output.WriteLine("Synthetic workload: 100,001 rows in one tenant/company; 5 EXPLAIN ANALYZE repetitions per plan.");
+            output.WriteLine($"Before index median execution: {baseline.MedianMilliseconds:F3} ms");
+            output.WriteLine($"After index median execution: {indexed.MedianMilliseconds:F3} ms");
+            output.WriteLine($"After index plan: {indexed.Plan}");
+            Assert.Contains(indexName, indexed.Plan, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await ExecuteSqlAsync(connection, $"""
+                CREATE INDEX IF NOT EXISTS "{indexName}"
+                ON inventory.stock_moves
+                    ("TenantId", "CompanyId", "ReferenceDocumentType", "ReferenceDocumentId",
+                     "Type", "State", "ProductId")
+                INCLUDE ("Quantity")
+                """);
+        }
+    }
+
+    [Fact]
+    public async Task DelayedFulfillmentProgressDoesNotReopenCancelledSalesOrder()
+    {
+        await using var scope = await TestScope.CreateAsync(fixture.ConnectionString);
+        var firstDelivery = await PrepareMutation(scope, "delivery-partial");
+        await firstDelivery.Execute(CancellationToken.None);
+        var order = await scope.Sales.SalesOrders.AsNoTracking()
+            .SingleAsync(item => item.Id == scope.SalesOrderId);
+        await scope.ServiceProvider.GetRequiredService<ISalesOrderService>()
+            .TransitionAsync(order.Id, SalesOrderState.Cancelled, order.ConcurrencyStamp, CancellationToken.None);
+
+        var consumer = scope.ServiceProvider
+            .GetRequiredService<IIntegrationEventConsumer<SalesOrderFulfillmentProgressEvent>>();
+        await consumer.HandleAsync(new SalesOrderFulfillmentProgressEvent(
+            Guid.NewGuid(), FixedClock.Now, scope.SalesOrderId, scope.ProductA.Id, 50, 2, false),
+            EventContext(scope), CancellationToken.None);
+
+        await using var reader = scope.ReadSales();
+        Assert.Equal(SalesOrderState.Cancelled,
+            await reader.SalesOrders.Where(item => item.Id == scope.SalesOrderId)
+                .Select(item => item.State).SingleAsync());
+    }
+
+    [Fact]
+    public async Task FulfillmentStatusAndAuditRollbackTogetherAndProgressCanBeRetried()
+    {
+        await using var scope = await TestScope.CreateAsync(fixture.ConnectionString);
+        var firstReceipt = await PrepareMutation(scope, "receipt-full");
+        await firstReceipt.Execute(CancellationToken.None);
+        var consumer = scope.ServiceProvider
+            .GetRequiredService<IIntegrationEventConsumer<PurchaseOrderFulfillmentProgressEvent>>();
+        var progress = new PurchaseOrderFulfillmentProgressEvent(
+            Guid.NewGuid(), FixedClock.Now, scope.PurchaseOrderId, scope.ProductA.Id, 50, 50, true);
+        var context = EventContext(scope);
+        scope.Audit.FailOnFlush = scope.Audit.FlushCalls + 1;
+
+        await Assert.ThrowsAsync<InjectedAuditException>(
+            () => consumer.HandleAsync(progress, context, CancellationToken.None));
+
+        await using (var afterFailure = scope.ReadPurchasing())
+        {
+            Assert.Equal(PurchaseOrderState.Confirmed,
+                await afterFailure.PurchaseOrders.Where(item => item.Id == scope.PurchaseOrderId)
+                    .Select(item => item.State).SingleAsync());
+        }
+        await using (var platform = scope.ReadPlatform())
+            Assert.False(await platform.AuditLogs.AnyAsync(item =>
+                item.CompanyId == scope.CompanyId && item.Action == "purchasing.purchase_order.fulfillment_updated"));
+
+        await consumer.HandleAsync(progress, context, CancellationToken.None);
+        await consumer.HandleAsync(progress, context, CancellationToken.None);
+
+        await using (var afterRetry = scope.ReadPurchasing())
+        {
+            Assert.Equal(PurchaseOrderState.PartiallyReceived,
+                await afterRetry.PurchaseOrders.Where(item => item.Id == scope.PurchaseOrderId)
+                    .Select(item => item.State).SingleAsync());
+        }
+        await using var finalPlatform = scope.ReadPlatform();
+        Assert.Equal(1, await finalPlatform.AuditLogs.CountAsync(item =>
+            item.CompanyId == scope.CompanyId && item.Action == "purchasing.purchase_order.fulfillment_updated"));
+    }
+
     [Theory]
     [InlineData("warehouse-create")]
     [InlineData("warehouse-update")]
@@ -620,6 +1013,8 @@ public sealed class AtomicInventoryPostgresTests(AtomicInventoryPostgresFixture 
 
     private static DateOnly BusinessDate => new(2026, 10, 18);
     private static string Stamp() => Guid.NewGuid().ToString("N");
+    private static IntegrationEventContext EventContext(TestScope scope) =>
+        new(Guid.NewGuid(), new(scope.TenantId), new(scope.CompanyId), 1, "fulfillment-status-test");
     private static StockMoveRequest MoveRequest(TestScope scope) => new(StockMoveType.Adjustment, scope.ProductA.Id, 2,
         scope.Gain.Id, scope.InternalA.Id, BusinessDate, Notes: " Atomic movement ");
     private static ReserveStockRequest ReserveRequest(TestScope scope, string key = "new-reservation") =>
@@ -676,7 +1071,8 @@ public sealed class AtomicInventoryPostgresTests(AtomicInventoryPostgresFixture 
             if (operation == "delivery-full")
             {
                 await using var sales = scope.ReadSales();
-                (await sales.SalesOrderLines.SingleAsync(item => item.SalesOrderId == scope.SalesOrderId)).Quantity = 4;
+                (await sales.SalesOrderLines.SingleAsync(item =>
+                    item.SalesOrderId == scope.SalesOrderId && item.ProductId == scope.ProductA.Id)).Quantity = 4;
                 await sales.SaveChangesAsync();
             }
         }
@@ -923,6 +1319,42 @@ public sealed class AtomicInventoryPostgresTests(AtomicInventoryPostgresFixture 
         Assert.Equal(events, await platform.OutboxMessages.CountAsync(item => item.CompanyId == scope.CompanyId));
     }
 
+    private static async Task ExecuteSqlAsync(NpgsqlConnection connection, string sql)
+    {
+        await using var command = new NpgsqlCommand(sql, connection);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async Task<(double MedianMilliseconds, string Plan)> MeasurePlanAsync(
+        NpgsqlConnection connection,
+        string query)
+    {
+        var executionTimes = new List<double>();
+        var lastPlan = string.Empty;
+        for (var iteration = 0; iteration < 5; iteration++)
+        {
+            await using var command = new NpgsqlCommand(query, connection);
+            await using var reader = await command.ExecuteReaderAsync();
+            var lines = new List<string>();
+            while (await reader.ReadAsync())
+            {
+                var line = reader.GetString(0);
+                lines.Add(line);
+                const string executionTimePrefix = "Execution Time: ";
+                if (line.StartsWith(executionTimePrefix, StringComparison.Ordinal)
+                    && double.TryParse(line[executionTimePrefix.Length..].Split(' ')[0],
+                        NumberStyles.Float, CultureInfo.InvariantCulture, out var milliseconds))
+                    executionTimes.Add(milliseconds);
+            }
+
+            lastPlan = string.Join(Environment.NewLine, lines);
+        }
+
+        Assert.Equal(5, executionTimes.Count);
+        executionTimes.Sort();
+        return (executionTimes[executionTimes.Count / 2], lastPlan);
+    }
+
     private static void AssertClean(TestScope scope)
     {
         Assert.Empty(scope.Database.ChangeTracker.Entries());
@@ -979,6 +1411,7 @@ public sealed class AtomicInventoryPostgresTests(AtomicInventoryPostgresFixture 
         public Guid TenantId { get; } = tenantId;
         public Guid CompanyId { get; } = companyId;
         public Guid UserId { get; } = userId;
+        public IServiceProvider ServiceProvider => services.ServiceProvider;
         public Guid ContactId { get; private set; }
         public Guid SalesOrderId { get; private set; }
         public Guid PurchaseOrderId { get; private set; }
@@ -1016,7 +1449,8 @@ public sealed class AtomicInventoryPostgresTests(AtomicInventoryPostgresFixture 
         public PurchasingDbContext ReadPurchasing() => new(new DbContextOptionsBuilder<PurchasingDbContext>().UseNpgsql(connectionString).Options, new TestTenant(TenantId), new TestCompany(CompanyId));
         public ContactsDbContext ReadContacts() => new(new DbContextOptionsBuilder<ContactsDbContext>().UseNpgsql(connectionString).Options, new TestTenant(TenantId), new TestCompany(CompanyId));
         public ProductsDbContext ReadProducts() => new(new DbContextOptionsBuilder<ProductsDbContext>().UseNpgsql(connectionString).Options, new TestTenant(TenantId), new TestCompany(CompanyId));
-        public TestScope CreatePeer() => Build(connectionString, TenantId, CompanyId, UserId);
+        public TestScope CreatePeer(FulfillmentSaveGate? fulfillmentSaveGate = null) =>
+            Build(connectionString, TenantId, CompanyId, UserId, fulfillmentSaveGate);
 
         public static async Task<TestScope> CreateAsync(string connectionString, Guid? existingTenant = null)
         {
@@ -1157,6 +1591,22 @@ public sealed class AtomicInventoryPostgresTests(AtomicInventoryPostgresFixture 
                 Subtotal = 500,
                 Total = 500
             });
+            sales.Lines.Add(new()
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                CompanyId = CompanyId,
+                SalesOrderId = sales.Id,
+                Sequence = 2,
+                ProductId = ProductB.Id,
+                ProductSku = ProductB.Sku,
+                Description = ProductB.Name,
+                UnitCode = "EA",
+                Quantity = 2,
+                UnitPrice = 10,
+                Subtotal = 20,
+                Total = 20
+            });
             SalesOrderId = sales.Id;
             Sales.Quotations.Add(quote);
             Sales.SalesOrders.Add(sales);
@@ -1197,16 +1647,35 @@ public sealed class AtomicInventoryPostgresTests(AtomicInventoryPostgresFixture 
                 Subtotal = 250,
                 Total = 250
             });
+            purchase.Lines.Add(new()
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                CompanyId = CompanyId,
+                PurchaseOrderId = purchase.Id,
+                Sequence = 2,
+                ProductId = ProductB.Id,
+                ProductSku = ProductB.Sku,
+                Description = ProductB.Name,
+                UnitCode = "EA",
+                Quantity = 3,
+                UnitPrice = 5,
+                Subtotal = 15,
+                Total = 15
+            });
             PurchaseOrderId = purchase.Id;
             Purchasing.PurchaseOrders.Add(purchase);
             await Purchasing.SaveChangesAsync();
             Purchasing.ChangeTracker.Clear();
         }
 
-        private static TestScope Build(string connection, Guid tenant, Guid company, Guid user)
+        private static TestScope Build(string connection, Guid tenant, Guid company, Guid user,
+            FulfillmentSaveGate? fulfillmentSaveGate = null)
         {
             var registry = new IntegrationEventRegistry();
             new InventoryModule().ConfigureIntegrationEvents(registry);
+            new SalesModule().ConfigureIntegrationEvents(registry);
+            new PurchasingModule().ConfigureIntegrationEvents(registry);
             var registrations = new ServiceCollection();
             registrations.AddSingleton<ITenantContext>(new TestTenant(tenant));
             registrations.AddSingleton<ICompanyContext>(new TestCompany(company));
@@ -1224,6 +1693,14 @@ public sealed class AtomicInventoryPostgresTests(AtomicInventoryPostgresFixture 
             new SalesModule().ConfigureServices(registrations, configuration);
             new PurchasingModule().ConfigureServices(registrations, configuration);
             new InventoryModule().ConfigureServices(registrations, configuration);
+            if (fulfillmentSaveGate is not null)
+            {
+                registrations.AddSingleton(fulfillmentSaveGate);
+                registrations.AddDbContext<SalesDbContext>((provider, options) =>
+                    options.AddInterceptors(provider.GetRequiredService<FulfillmentSaveGate>()));
+                registrations.AddDbContext<PurchasingDbContext>((provider, options) =>
+                    options.AddInterceptors(provider.GetRequiredService<FulfillmentSaveGate>()));
+            }
             registrations.AddScoped<OneShotSaveHook>();
             registrations.AddScoped<OneShotCommandHook>();
             registrations.AddDbContext<InventoryDbContext>((provider, options) => options.AddInterceptors(provider.GetRequiredService<OneShotSaveHook>(), provider.GetRequiredService<OneShotCommandHook>()));
@@ -1314,6 +1791,44 @@ public sealed class AtomicInventoryPostgresTests(AtomicInventoryPostgresFixture 
         public override ValueTask<InterceptionResult> ThrowingConcurrencyExceptionAsync(ConcurrencyExceptionEventData eventData,
             InterceptionResult result, CancellationToken cancellationToken = default)
         { LastFailure = eventData.Exception; return ValueTask.FromResult(result); }
+    }
+
+    private sealed class FulfillmentSaveGate : SaveChangesInterceptor
+    {
+        private Guid orderId;
+        private string? blockedState;
+        private int claimed;
+
+        public TaskCompletionSource Blocked { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void BlockNext(Guid targetOrderId, string targetState)
+        {
+            orderId = targetOrderId;
+            blockedState = targetState;
+        }
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            var entry = eventData.Context?.ChangeTracker.Entries().FirstOrDefault(candidate =>
+                candidate.State == EntityState.Modified
+                && candidate.Entity switch
+                {
+                    SalesOrder order => order.Id == orderId && order.State.ToString() == blockedState,
+                    PurchaseOrder order => order.Id == orderId && order.State.ToString() == blockedState,
+                    _ => false
+                });
+            if (entry is not null && Interlocked.Exchange(ref claimed, 1) == 0)
+            {
+                Blocked.TrySetResult();
+                await Release.Task.WaitAsync(cancellationToken);
+            }
+
+            return result;
+        }
     }
 
     private sealed class InjectedAuditException : Exception;
