@@ -89,3 +89,43 @@
     .chart-axis-label { font-size: 20px; }
     .chart-mobile-hint { display: block; color: #526078; margin: .5rem 0 0; font-size: .72rem; line-height: 1.5; }
 }
+
+.dashboard-scope { color: var(--brand-strong); border-color: #d7e9ff; background: #edf5ff; }
+.scope-dot, .dashboard-metric::before { background: var(--chart-blue); }
+.dashboard-metric-teal::before { background: var(--chart-teal); }
+.dashboard-metric-amber::before { background: var(--chart-amber); }
+.dashboard-metric-rose::before { background: var(--chart-rose); }
+.dashboard-metric, .dashboard-chart-card { border-color: var(--line); border-radius: 1rem; }
+.metric-label, .metric-caption, .dashboard-applied-range, .filter-help,
+.dashboard-loading, .dashboard-footnote, .stock-summary { color: var(--muted); }
+.metric-value, .dashboard-applied-range strong, .stock-summary strong { color: var(--text); }
+.dashboard-chart-card { background: var(--panel); }
+.report-chart figcaption h3 { color: var(--text); }
+.bar-chart text { fill: #515158; }
+.chart-axis-label { fill: var(--muted); }
+.chart-baseline { stroke: var(--line-strong); }
+.chart-bar-blue { fill: var(--chart-blue); }
+.chart-bar-teal { fill: var(--chart-teal); }
+.chart-bar-amber { fill: var(--chart-amber); }
+.chart-bar-rose { fill: var(--chart-rose); }
+.chart-data { border-color: var(--line); }
+.chart-data > summary { color: var(--brand-strong); }
+.chart-data th[scope="row"] { color: var(--text); }
+.chart-empty { border-color: var(--line-strong); background: #fafafd; }
+.chart-empty > span { color: var(--brand-strong); background: var(--brand-soft); }
+.chart-error { border-color: #f1c4c9; border-radius: .85rem; background: #fff5f6; color: #b00020; }
+.report-visual-summary { border-color: var(--line); }
+
+.dashboard-scope { color: #1d1d1f; border-color: #d1d1d6; background: #f0f0f2; }
+.scope-dot, .dashboard-metric::before { background: var(--chart-blue); }
+.dashboard-metric-teal::before { background: var(--chart-teal); }
+.dashboard-metric-amber::before { background: var(--chart-amber); }
+.dashboard-metric-rose::before { background: var(--chart-rose); }
+.chart-bar-blue { fill: var(--chart-blue); }
+.chart-bar-teal { fill: var(--chart-teal); }
+.chart-bar-amber { fill: var(--chart-amber); }
+.chart-bar-rose { fill: var(--chart-rose); }
+.chart-data > summary { color: #1d1d1f; }
+.chart-data > summary:focus-visible { outline-color: #6e6e73; }
+.chart-empty > span { color: #1d1d1f; background: #ededf0; }
+.chart-error { border-color: #d1d1d6; background: #f5f5f7; color: #1d1d1f; }

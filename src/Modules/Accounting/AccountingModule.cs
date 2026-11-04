@@ -25,6 +25,8 @@ public sealed class AccountingModule : IErpModule
         services.AddScoped<ICustomerInvoiceService, CustomerInvoiceService>();
         services.AddScoped<ISupplierBillService, SupplierBillService>();
         services.AddScoped<IPaymentService, PaymentService>();
+        services.Configure<PayWayOptions>(configuration.GetSection("PayWay"));
+        services.AddHttpClient<IPayWayService, PayWayService>();
         services.AddScoped<IFinancialControlsService, FinancialControlsService>();
         services.AddScoped<IAccountingPeriodStatus, AccountingPeriodStatus>();
         services.AddScoped<IAccountingReportingData, AccountingReportingData>();

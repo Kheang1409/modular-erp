@@ -22,6 +22,12 @@ Compose sets `Web__ApiBaseAddress=http://127.0.0.1:8080/` so server-rendered pag
 
 The supplied Compose setup is for **local development**, not production. It starts PostgreSQL 18, applies platform and module migrations, and bootstraps the administrator once. While bootstrap credentials remain configured, subsequent startup synchronizes the system Administrator role with registered permissions without resetting the user's password. Remove `ERP_ADMIN_EMAIL` and `ERP_ADMIN_PASSWORD` after initial setup. Named volumes retain the database, files, authentication keys, and external modules; `docker compose down -v` deletes those volumes and must not be used on data you need to keep.
 
+### ABA PayWay sandbox
+
+The Accounting → Payments page can create a hosted ABA PayWay checkout for an outstanding USD or KHR customer invoice. Register for a [PayWay sandbox account](https://sandbox.payway.com.kh/register-sandbox/) and set `PAYWAY_MERCHANT_ID`, `PAYWAY_API_KEY`, and `PAYWAY_PUBLIC_BASE_URL` in the untracked `.env` file. The public base URL must be HTTPS and its domain must be allowlisted in the PayWay merchant profile; for local development, use a public HTTPS tunnel. The sandbox purchase and status-check URLs are preconfigured in `.env.example`.
+
+The checkout is signed on the server. After returning to the app, an authorized user must verify the transaction with PayWay before a draft customer receipt is created. That receipt still requires the usual accounting review and posting. For production, use production merchant credentials and PayWay production endpoints, and provide secrets through your deployment's secret manager rather than a committed or shared `.env` file. See the [ABA PayWay eCommerce checkout guide](https://developer.payway.com.kh/folder-3158159.md) and [transaction-status API](https://developer.payway.com.kh/check-transaction-14530826e0.md).
+
 Useful local endpoints:
 
 - `/help` — getting-started workflows
@@ -58,7 +64,7 @@ Access changes and password resets invalidate previous sessions. Administration 
 
 ## Interface and reporting
 
-The responsive Blazor workspace uses locally served Bootstrap 5.3.8 with an application-specific theme. Microsoft Library Manager restores the pinned CSS during the build; no Node.js toolchain or browser connection to a public CDN is required. See [third-party notices](THIRD_PARTY_NOTICES.md) for its MIT license.
+The responsive Blazor workspace uses locally served Bootstrap 5.3.8 with a black-and-white theme, clear focus indicators, and motion that respects the reduced-motion preference. Microsoft Library Manager restores the pinned CSS during the build; no Node.js toolchain or browser connection to a public CDN is required. See [third-party notices](THIRD_PARTY_NOTICES.md) for its MIT license.
 
 Open **Reports → Performance dashboard** for company-specific charts and summaries, then use the detail reports and CSV downloads to reconcile results. Existing report permissions control visibility; the dashboard grants no additional access.
 
@@ -119,39 +125,9 @@ dotnet test tests/EndToEndTests/Erp.EndToEndTests.csproj --no-build --filter "Fu
 
 Run the complete browser suite only against a disposable test environment: `CriticalWorkflowTests` creates business and administrative records. `dotnet test Erp.slnx --no-build` runs all test projects and requires Docker; browser verification additionally requires the settings above. The [CI workflow](.github/workflows/ci.yml) separates unit, architecture, integration, and configured browser checks, retains test diagnostics, and also exercises module packaging and isolated backup/restore.
 
-## Current milestone and next steps
+## Project status
 
-This is a pre-release community preview, not a production-readiness guarantee. Contacts, Products, CRM, Sales, Purchasing, Inventory, and Accounting mutations enlist their business changes and platform audit records in one PostgreSQL transaction. CRM includes pipeline configuration, assignments, activities, and both audit entries for lead conversion. Sales and Purchasing include document numbering, document lines, and their existing outbox events. Inventory includes warehouse/location changes, movement batches and completion, corrections, reservations, numbering, and its existing events while retaining advisory stock locks and immutable completed movements. Accounting includes configuration, ledger posting/reversals, invoices, bills, payment allocations/reversals, financial controls, and its six existing events; posted ledger history and existing GUID-based number formats remain unchanged. Each valid Contacts or Products CSV row still commits independently during ordinary imports. See the [transaction boundary](docs/architecture/overview.md#business-transaction-boundary) and the [upgrade article](docs/updates/reliability-and-ci-upgrade.md).
-
-Reporting now adds historical-aging, stable multi-page detail, export-streaming,
-and responsive accessibility regressions. These bounded datasets complement the
-existing ledger performance check; they do not certify production-scale capacity.
-Inventory fulfillment progress now updates Sales and Purchasing order states
-through retry-safe outbox consumers. Partial and complete states are derived from
-the committed movement ledger across all product lines; updates are eventual,
-duplicate-safe, and never reopen cancelled orders. Compensating stock corrections
-do not automatically reverse a business order's fulfillment state.
-Platform currency writes now share their audit transaction and serialize changes
-within each company. Module updates retain the old package until state is saved,
-restore it on recoverable failures, and reject malformed enablement state.
-Cooperating package managers and startup discovery serialize on the same
-normalized root path on one host. Filesystem changes and the web endpoint's audit
-write are still separate commits; this is not crash-safe or multi-host recovery.
-See the [module recovery boundary](docs/modules/module-sdk.md#failure-and-recovery-boundary).
-Outbox and background-job result updates now verify a fresh per-claim lease ID,
-so superseded workers cannot overwrite a newer attempt. Dead-letter replay uses
-an eligible-state transition and commits with its audit record. Delivery remains
-at least once; handlers still need idempotent side effects. The additive queue
-lease migration requires a [stop-all-old-workers rollout](docs/deployment/production.md#queue-lease-ownership-upgrade),
-not mixed-version workers against the same database.
-A review of current built-in write paths found no uncoordinated database/audit
-mutation; external file-storage and module-package filesystem changes remain
-outside the PostgreSQL transaction. Remaining release gates are production-volume
-performance and security checks, production-like restore and crash/migration
-recovery, a green complete CI run, and reviewed release notes and a version tag.
-New writable modules must explicitly adopt the shared boundary.
-Advanced inventory costing, lots/serials, and additional ERP modules remain
-separate future extensions.
+Open ERP is an early community preview; it has not been certified for production use. Before deploying it to production, complete the performance, security, migration, and backup-recovery checks described in the [production guide](docs/deployment/production.md). The [changelog](CHANGELOG.md) tracks ongoing work, and the [architecture overview](docs/architecture/overview.md) explains how modules keep business changes and their audit records together.
 
 ## Architecture and extension points
 

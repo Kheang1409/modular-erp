@@ -22,9 +22,17 @@ Tax codes retain rates and optional input/output accounts. Effective-dated excha
 
 Bank reconciliations match posted journal entries containing movement in the chosen asset account. A journal entry can be cleared only once, and a reconciliation can be finalized only when its statement difference is zero.
 
+## ABA PayWay checkout
+
+The Payments page can create a hosted ABA PayWay checkout for an outstanding USD or KHR customer invoice. Checkout details are signed by the server; returning from the provider does not count as proof of payment. An authorized user must request a server-to-server status check before the app creates a draft customer receipt. The provider must report an approved transaction whose amount and currency match the checkout.
+
+Both checkout and confirmation require `accounting.payment.manage` and `accounting.invoice.read`. The anonymous provider callback does not change accounting records. A confirmed receipt remains a draft and follows the normal journal review and posting process.
+
+For sandbox setup, configure `PAYWAY_MERCHANT_ID`, `PAYWAY_API_KEY`, and `PAYWAY_PUBLIC_BASE_URL` in the deployment environment. The public URL must use HTTPS and its domain must be allowlisted in the PayWay merchant profile. Sandbox endpoints and further setup notes are in the [README](../../README.md#aba-payway-sandbox).
+
 ## Integration and security
 
-Permissions distinguish read, configuration, journal posting, period close, invoices, bills, payments, and reconciliation. Every API endpoint declares a permission. Material state changes append audit records. Posted entries, invoices, bills, payments, reversals, and period closes publish registered integration events through the platform outbox.
+Permissions distinguish read, configuration, journal posting, period close, invoices, bills, payments, and reconciliation. API routes enforce their declared permissions; the anonymous PayWay callback does not change accounting records. Material state changes append audit records. Posted entries, invoices, bills, payments, reversals, and period closes publish registered integration events through the platform outbox.
 
 The interactive pages are available under the Accounting navigation group. API routes use `/api/v1/accounting`.
 

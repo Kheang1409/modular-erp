@@ -1,6 +1,7 @@
 using Erp.Modules.Accounting;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -18,6 +19,7 @@ public sealed class AccountingAuthorizationTests
         builder.Services.AddScoped<ICustomerInvoiceService>(_ => null!);
         builder.Services.AddScoped<ISupplierBillService>(_ => null!);
         builder.Services.AddScoped<IPaymentService>(_ => null!);
+        builder.Services.AddScoped<IPayWayService>(_ => null!);
         builder.Services.AddScoped<IFinancialControlsService>(_ => null!);
         var app = builder.Build();
         new AccountingModule().ConfigureEndpoints(app);
@@ -38,6 +40,8 @@ public sealed class AccountingAuthorizationTests
             [("/api/v1/accounting/payments", "POST")] = AccountingPermissions.PaymentManage,
             [("/api/v1/accounting/payments/{id:guid}/post", "POST")] = AccountingPermissions.PaymentPost,
             [("/api/v1/accounting/payments/{id:guid}/reverse", "POST")] = AccountingPermissions.PaymentPost,
+            [("/api/v1/accounting/payments/payway/checkout", "POST")] = AccountingPermissions.PaymentManage,
+            [("/api/v1/accounting/payments/payway/confirm", "POST")] = AccountingPermissions.PaymentManage,
             [("/api/v1/accounting/bills", "GET")] = AccountingPermissions.BillRead,
             [("/api/v1/accounting/bills/{id:guid}", "GET")] = AccountingPermissions.BillRead,
             [("/api/v1/accounting/bills/from-purchase-order", "POST")] = AccountingPermissions.BillManage,
@@ -74,10 +78,23 @@ public sealed class AccountingAuthorizationTests
         foreach (var endpoint in endpoints)
         {
             var method = Assert.Single(endpoint.Metadata.GetMetadata<HttpMethodMetadata>()!.HttpMethods);
-            var authorization = Assert.Single(endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>());
-            Assert.Equal(expected[(endpoint.RoutePattern.RawText!, method)], authorization.Policy);
+            var route = endpoint.RoutePattern.RawText!;
+            var policies = endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>().Select(x => x.Policy).ToArray();
+            if (route == "/api/v1/accounting/payments/payway/callback")
+            {
+                Assert.Empty(policies);
+                Assert.NotEmpty(endpoint.Metadata.GetOrderedMetadata<IAllowAnonymous>());
+            }
+            else if (route is "/api/v1/accounting/payments/payway/checkout" or "/api/v1/accounting/payments/payway/confirm")
+            {
+                Assert.Equal(new[] { AccountingPermissions.PaymentManage, AccountingPermissions.InvoiceRead }, policies);
+            }
+            else
+            {
+                Assert.Equal(expected[(route, method)], Assert.Single(policies));
+            }
         }
 
-        Assert.Equal(expected.Count, endpoints.Length);
+        Assert.Equal(expected.Count + 1, endpoints.Length);
     }
 }

@@ -3,9 +3,31 @@
 @inject HttpClient Http
 
 <PageTitle>Payments</PageTitle>
-<article class="card contacts-card">
-    <p class="eyebrow">Cash and allocations</p><h1>Payments</h1>
-    <p>Record receipts or supplier payments, allocate them without exceeding open balances, and post the resulting cash entry.</p>
+<div class="payments-page">
+    <div class="page-heading payments-heading">
+        <div><p class="eyebrow">Cash and collections</p><h1>Payments</h1><p class="muted">Track receipts and supplier payments, allocate open balances, and post verified cash entries.</p></div>
+        <span class="payments-period">@DateTime.Today.ToString("MMMM yyyy")</span>
+    </div>
+    <AuthorizeView Policy="@AccountingPermissions.PaymentManage" Context="paywayManageContext">
+        <Authorized Context="paywayManage">
+            <AuthorizeView Policy="@AccountingPermissions.InvoiceRead" Context="paywayInvoiceContext">
+                <Authorized>
+                    @if (!string.IsNullOrWhiteSpace(CheckoutToken))
+                    {
+                        <section class="payway-confirm-panel" aria-labelledby="payway-confirm-heading">
+                            <div><p class="eyebrow">Payment update</p><h2 id="payway-confirm-heading">Check ABA PayWay status</h2><p class="muted">Confirm the transaction directly with ABA PayWay. A successful result creates a draft receipt for your normal accounting review.</p></div>
+                            <button type="button" disabled="@_confirming" @onclick="ConfirmPayWay">@(_confirming ? "Checking with ABA..." : "Verify payment")</button>
+                            @if (_confirmMessage is not null) { <p class="notice notice-success" role="status">@_confirmMessage</p> }
+                            @if (_confirmError is not null) { <p class="notice notice-error" role="alert">@_confirmError</p> }
+                        </section>
+                    }
+                    <PayWayCheckoutPanel />
+                </Authorized>
+            </AuthorizeView>
+        </Authorized>
+    </AuthorizeView>
+    <article class="card contacts-card payments-register">
+        <div class="payments-section-heading"><div><p class="eyebrow">Cash and allocations</p><h2>Payment register</h2><p class="muted">Draft payments are never posted automatically.</p></div><span class="payments-count">@(_loading ? "Loading" : $"{_payments.Count} payments")</span></div>
     @if (_loading) { <p role="status">Loading payments...</p> }
     else if (_loadError is not null) { <div class="notice notice-error" role="alert">@_loadError <button type="button" @onclick="Load">Try again</button></div> }
     else
@@ -49,16 +71,21 @@
         }
         @if (_error is not null) { <div class="notice notice-error" role="alert">@_error</div> }
         @if (_message is not null) { <div class="notice notice-success" role="status">@_message</div> }
-        <h2>Payment register</h2>
-        @if (_payments.Count == 0) { <p>No payments recorded.</p> }
+        <div class="filter-bar payment-filters" role="search">
+            <label class="filter-search">Search payments<InputText @bind-Value="_search" placeholder="Number, customer, or reference" /></label>
+            <label>Status<select @bind="_stateFilter"><option value="">All statuses</option>@foreach (var state in Enum.GetValues<PaymentState>()) { <option @key="state" value="@state">@state</option> }</select></label>
+            <button type="button" class="button-secondary" @onclick="ClearFilters">Clear filters</button>
+        </div>
+        @if (_payments.Count == 0) { <div class="empty-state"><h3>No payments yet</h3><p>Customer receipts and supplier payments will appear here.</p></div> }
+        else if (!FilteredPayments.Any()) { <div class="empty-state"><h3>No matching payments</h3><p>Try changing the status or search filters.</p></div> }
         else
         {
             <div class="table-scroll" tabindex="0" role="region" aria-label="Payment register">
                 <table><caption>Payment register</caption>
                     <thead><tr><th scope="col">Number</th><th scope="col">Party</th><th scope="col">Date</th><th scope="col">Amount</th><th scope="col">Allocated</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
-                    <tbody>@foreach (var payment in _payments)
+                    <tbody>@foreach (var payment in FilteredPayments)
                     {
-                        <tr @key="payment.Id"><td>@payment.Number<br /><small>@payment.Reference</small></td><td>@payment.PartyName</td><td>@payment.PaymentDate</td><td>@payment.Amount.ToString("N2") @payment.CurrencyCode</td><td>@payment.AllocatedAmount.ToString("N2")</td><td>@payment.State</td><td>
+                        <tr @key="payment.Id"><td><strong>@payment.Number</strong><br /><small>@payment.Reference</small></td><td>@payment.PartyName</td><td>@payment.PaymentDate</td><td class="numeric">@payment.Amount.ToString("N2") @payment.CurrencyCode</td><td class="numeric">@payment.AllocatedAmount.ToString("N2")</td><td><span class="status-badge @PaymentStatusClass(payment.State)">@payment.State</span></td><td class="payment-actions">
                             <AuthorizeView Policy="@AccountingPermissions.PaymentPost" Context="postAuth">
                                 @if (payment.State == PaymentState.Draft) { <button disabled="@_saving" @onclick="() => SelectForPosting(payment)">Post</button> }
                                 else if (payment.State == PaymentState.Posted) { <button class="button-secondary" disabled="@_saving" @onclick="() => Reverse(payment)">Reverse</button> }
@@ -69,7 +96,8 @@
             </div>
         }
     }
-</article>
+    </article>
+</div>
 
 @code {
     private readonly List<PaymentDto> _payments = [];
@@ -78,9 +106,17 @@
     private readonly PaymentForm _form = new();
     private PostingForm _posting = new();
     private PaymentDto? _selected;
-    private bool _loading = true, _saving, _focusPosting;
+    private bool _loading = true, _saving, _focusPosting, _confirming;
     private ElementReference _postingHeading;
-    private string? _loadError, _error, _message;
+    private string? _loadError, _error, _message, _search = "", _stateFilter = "", _confirmMessage, _confirmError;
+    [Parameter, SupplyParameterFromQuery(Name = "checkout")]
+    public string? CheckoutToken { get; set; }
+    private IEnumerable<PaymentDto> FilteredPayments => _payments.Where(payment =>
+        (string.IsNullOrWhiteSpace(_search) ||
+            payment.Number.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+            payment.PartyName.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+            payment.Reference.Contains(_search, StringComparison.OrdinalIgnoreCase)) &&
+        (string.IsNullOrWhiteSpace(_stateFilter) || payment.State.ToString() == _stateFilter));
     protected override Task OnInitializedAsync() => Load();
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -114,6 +150,58 @@
     private void SelectForPosting(PaymentDto payment) { _selected = payment; _posting = new(); _focusPosting = true; _error = null; _message = null; }
     private void DismissPosting() { _selected = null; _focusPosting = false; _error = null; }
     private void BankChanged() { if (!EligibleControlAccounts.Any(x => x.Id == _posting.ControlAccountId)) _posting.ControlAccountId = Guid.Empty; }
+    private static string PaymentStatusClass(PaymentState state) => state switch
+    {
+        PaymentState.Posted => "is-success",
+        PaymentState.Reversed => "is-warning",
+        _ => "is-neutral"
+    };
+    private void ClearFilters() { _search = ""; _stateFilter = ""; }
+    private async Task ConfirmPayWay()
+    {
+        if (string.IsNullOrWhiteSpace(CheckoutToken)) return;
+        _confirming = true; _confirmError = null; _confirmMessage = null;
+        try
+        {
+            using var response = await Http.PostAsJsonAsync(
+                "api/v1/accounting/payments/payway/confirm",
+                new ConfirmPayWayPaymentRequest(CheckoutToken));
+            if (!response.IsSuccessStatusCode)
+            {
+                _confirmError = response.StatusCode == System.Net.HttpStatusCode.BadGateway
+                    ? "ABA PayWay could not verify this transaction. Please try again."
+                    : response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable
+                        ? "ABA PayWay is not configured on the server."
+                        : "The payment could not be verified. Check the checkout reference and try again.";
+                return;
+            }
+
+            var result = await response.Content.ReadFromJsonAsync<PayWayPaymentStatusDto>();
+            if (result is null)
+            {
+                _confirmError = "ABA PayWay returned an empty status.";
+            }
+            else if (result.Payment is { } payment)
+            {
+                _confirmMessage = payment.State == PaymentState.Draft
+                    ? $"Payment approved. Draft receipt {payment.Number} is ready for review and posting."
+                    : $"Payment approved. Receipt {payment.Number} is already {payment.State.ToString().ToLowerInvariant()}.";
+                await Load();
+            }
+            else
+            {
+                _confirmMessage = $"Payment status: {result.Status}. Verify again after the customer completes payment.";
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _confirmError = "The server could not verify the payment.";
+        }
+        finally
+        {
+            _confirming = false;
+        }
+    }
     private async Task PostSelected()
     {
         if (_selected is not { } payment) return;

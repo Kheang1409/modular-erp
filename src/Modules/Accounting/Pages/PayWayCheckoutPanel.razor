@@ -1,0 +1,127 @@
+@inject HttpClient Http
+
+<section class="payway-panel" aria-labelledby="payway-heading">
+    <div class="payway-panel-heading">
+        <div>
+            <p class="eyebrow">Online collections</p>
+            <h2 id="payway-heading">ABA PayWay</h2>
+            <p class="muted">Create a secure checkout for an open USD or KHR customer invoice.</p>
+        </div>
+        <span class="payway-mark" aria-hidden="true">ABA</span>
+    </div>
+
+    @if (_loading)
+    {
+        <p class="loading-state" role="status">Loading open invoices...</p>
+    }
+    else if (_loadError is not null)
+    {
+        <div class="notice notice-error" role="alert">@_loadError <button type="button" class="button-secondary" @onclick="LoadInvoices">Try again</button></div>
+    }
+    else if (_invoices.Count == 0)
+    {
+        <div class="empty-state"><h3>No invoices ready for online payment</h3><p>Only posted invoices with an outstanding USD or KHR balance can be sent to checkout.</p></div>
+    }
+    else if (_checkout is null)
+    {
+        <div class="payway-create-row">
+            <label for="payway-invoice">Invoice to collect</label>
+            <select id="payway-invoice" @bind="_selectedInvoiceId">
+                <option value="">Choose an invoice</option>
+                @foreach (var invoice in _invoices)
+                {
+                    <option @key="invoice.Id" value="@invoice.Id">@invoice.Number · @invoice.CustomerName · @invoice.AmountDue.ToString("N2") @invoice.CurrencyCode</option>
+                }
+            </select>
+            <button type="button" disabled="@(_selectedInvoiceId is null || _saving)" @onclick="CreateCheckout">
+                @(_saving ? "Preparing checkout..." : "Continue to ABA PayWay")
+            </button>
+        </div>
+    }
+    else
+    {
+        <div class="payway-ready" role="status">
+            <div><strong>Checkout is ready</strong><span>Transaction @_checkout.TransactionId</span></div>
+            <form action="@_checkout.CheckoutUrl" method="post">
+                @foreach (var field in _checkout.Fields)
+                {
+                    <input @key="field.Key" type="hidden" name="@field.Key" value="@field.Value" />
+                }
+                <button type="submit">Pay securely with ABA</button>
+            </form>
+            <button type="button" class="button-secondary" @onclick="ResetCheckout">Choose another invoice</button>
+        </div>
+    }
+    @if (_error is not null)
+    {
+        <div class="notice notice-error" role="alert">@_error</div>
+    }
+</section>
+
+@code {
+    private readonly List<CustomerInvoiceDto> _invoices = [];
+    private Guid? _selectedInvoiceId;
+    private PayWayCheckoutDto? _checkout;
+    private bool _loading = true, _saving;
+    private string? _loadError, _error;
+
+    protected override Task OnInitializedAsync() => LoadInvoices();
+
+    private async Task LoadInvoices()
+    {
+        _loading = true;
+        _loadError = null;
+        try
+        {
+            _invoices.Clear();
+            _invoices.AddRange((await Http.GetFromJsonAsync<List<CustomerInvoiceDto>>("api/v1/accounting/invoices") ?? [])
+                .Where(invoice => (invoice.State is CustomerInvoiceState.Posted or CustomerInvoiceState.PartiallyPaid)
+                    && invoice.AmountDue > 0
+                    && (invoice.CurrencyCode is "USD" or "KHR")));
+        }
+        catch (HttpRequestException)
+        {
+            _loadError = "Open invoices could not be loaded.";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task CreateCheckout()
+    {
+        if (_selectedInvoiceId is not { } invoiceId) return;
+
+        _saving = true;
+        _error = null;
+        try
+        {
+            using var response = await Http.PostAsJsonAsync("api/v1/accounting/payments/payway/checkout", new CreatePayWayCheckoutRequest(invoiceId));
+            if (!response.IsSuccessStatusCode)
+            {
+                _error = response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable
+                    ? "ABA PayWay is not configured yet. Add the merchant settings to the server environment."
+                    : "A checkout could not be created for this invoice.";
+                return;
+            }
+
+            _checkout = await response.Content.ReadFromJsonAsync<PayWayCheckoutDto>();
+            if (_checkout is null) _error = "ABA PayWay returned an empty checkout.";
+        }
+        catch (HttpRequestException)
+        {
+            _error = "The server could not prepare the ABA PayWay checkout.";
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private void ResetCheckout()
+    {
+        _checkout = null;
+        _error = null;
+    }
+}

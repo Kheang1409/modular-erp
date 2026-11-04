@@ -25,6 +25,11 @@ services:
       Database__MigrateOnStartup: "true"
       BootstrapAdmin__Email: ${ERP_ADMIN_EMAIL:-}
       BootstrapAdmin__Password: ${ERP_ADMIN_PASSWORD:-}
+      PayWay__MerchantId: ${PAYWAY_MERCHANT_ID:-}
+      PayWay__ApiKey: ${PAYWAY_API_KEY:-}
+      PayWay__PublicBaseUrl: ${PAYWAY_PUBLIC_BASE_URL:-}
+      PayWay__CheckoutUrl: ${PAYWAY_CHECKOUT_URL:-https://checkout-sandbox.payway.com.kh/api/payment-gateway/v1/payments/purchase}
+      PayWay__CheckTransactionUrl: ${PAYWAY_CHECK_TRANSACTION_URL:-https://checkout-sandbox.payway.com.kh/api/payment-gateway/v1/payments/check-transaction-2}
       DataProtection__KeysPath: /var/erp/keys
       FileStorage__Provider: Local
       FileStorage__LocalRootPath: /var/erp/files

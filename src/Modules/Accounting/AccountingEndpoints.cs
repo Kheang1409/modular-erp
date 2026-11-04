@@ -1,4 +1,5 @@
 using Erp.Abstractions.Modules;
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -24,6 +25,25 @@ internal static class AccountingEndpoints
         group.MapPost("/payments", (CreatePaymentRequest request, IPaymentService service, CancellationToken token) => Run(() => service.CreateAsync(request, token), true)).RequirePermission(AccountingPermissions.PaymentManage);
         group.MapPost("/payments/{id:guid}/post", (Guid id, PostPaymentRequest request, IPaymentService service, CancellationToken token) => Run(() => service.PostAsync(id, request, token))).RequirePermission(AccountingPermissions.PaymentPost);
         group.MapPost("/payments/{id:guid}/reverse", (Guid id, ReversePaymentRequest request, IPaymentService service, CancellationToken token) => Run(() => service.ReverseAsync(id, request, token), true)).RequirePermission(AccountingPermissions.PaymentPost);
+        group.MapPost("/payments/payway/checkout", async (CreatePayWayCheckoutRequest request, IPayWayService service, CancellationToken token) =>
+                await RunPayWay(() => service.CreateCheckoutAsync(request.InvoiceId, token)))
+            .WithName("CreatePayWayCheckout")
+            .WithSummary("Create an ABA PayWay checkout for an outstanding customer invoice")
+            .WithDescription("Creates a server-signed hosted checkout. Payment is not recorded until its status is verified with PayWay.")
+            .RequirePermission(AccountingPermissions.PaymentManage)
+            .RequirePermission(AccountingPermissions.InvoiceRead);
+        group.MapPost("/payments/payway/confirm", async (ConfirmPayWayPaymentRequest request, IPayWayService service, CancellationToken token) =>
+                await RunPayWay(() => service.ConfirmAsync(request.Ticket, token)))
+            .WithName("ConfirmPayWayPayment")
+            .WithSummary("Verify an ABA PayWay transaction")
+            .WithDescription("Checks the transaction directly with ABA PayWay and creates a draft receipt only after an approved, amount-matched response.")
+            .RequirePermission(AccountingPermissions.PaymentManage)
+            .RequirePermission(AccountingPermissions.InvoiceRead);
+        group.MapPost("/payments/payway/callback", () => Results.Ok(new { acknowledged = true }))
+            .WithName("PayWayCallback")
+            .WithSummary("Acknowledge ABA PayWay callback")
+            .WithDescription("Acknowledges provider callbacks without trusting their contents; transaction status is verified server-to-server.")
+            .AllowAnonymous();
         group.MapGet("/bills", (ISupplierBillService service, CancellationToken token) => Run(() => service.ListAsync(token))).RequirePermission(AccountingPermissions.BillRead);
         group.MapGet("/bills/{id:guid}", (Guid id, ISupplierBillService service, CancellationToken token) => Run(() => service.GetAsync(id, token))).RequirePermission(AccountingPermissions.BillRead);
         group.MapPost("/bills/from-purchase-order", (CreateSupplierBillRequest request, ISupplierBillService service, CancellationToken token) => Run(() => service.CreateFromPurchaseOrderAsync(request, token), true)).RequirePermission(AccountingPermissions.BillManage);
@@ -58,5 +78,16 @@ internal static class AccountingEndpoints
         catch (AccountingValidationException exception) { return Results.ValidationProblem(exception.Errors); }
         catch (AccountingConcurrencyException exception) { return Results.Conflict(new { error = exception.Message }); }
         catch (KeyNotFoundException) { return Results.NotFound(); }
+    }
+
+    private static async Task<IResult> RunPayWay<T>(Func<Task<T>> action)
+    {
+        try { return Results.Ok(await action()); }
+        catch (AccountingValidationException exception) { return Results.ValidationProblem(exception.Errors); }
+        catch (KeyNotFoundException) { return Results.NotFound(); }
+        catch (PayWayTicketException) { return Results.BadRequest(new { error = "The checkout reference is invalid or expired." }); }
+        catch (PayWayNotConfiguredException) { return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "ABA PayWay is not configured."); }
+        catch (HttpRequestException) { return Results.Problem(statusCode: StatusCodes.Status502BadGateway, title: "ABA PayWay could not verify the transaction."); }
+        catch (JsonException) { return Results.Problem(statusCode: StatusCodes.Status502BadGateway, title: "ABA PayWay returned an unreadable response."); }
     }
 }
