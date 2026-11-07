@@ -392,8 +392,8 @@ form > .content-grid { margin: 0; }
 html { scroll-padding-top: 5.5rem; }
 body { background: var(--bg); font-size: .94rem; }
 button, .button { border-radius: .7rem; transition: background-color .18s ease, border-color .18s ease, box-shadow .2s ease, transform .2s ease; }
-button:not(:disabled):hover, .button:not(.is-disabled):hover { transform: translateY(-1px); }
-button:active, .button:active { transform: translateY(0); }
+button:not(:disabled):not(.sidebar-scrim):hover, .button:not(.is-disabled):hover { transform: translateY(-1px); }
+button:not(.sidebar-scrim):active, .button:active { transform: translateY(0); }
 input, select, textarea { border-radius: .65rem; transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease; }
 
 .workspace-header {
@@ -623,7 +623,7 @@ button, .button, .btn {
     box-shadow: none;
     transition: color .18s ease, background-color .18s ease, border-color .18s ease, box-shadow .22s ease, transform .22s cubic-bezier(.2, .7, .2, 1);
 }
-button:not(:disabled):hover, .button:not(.is-disabled):hover, .btn:hover {
+button:not(:disabled):not(.sidebar-scrim):hover, .button:not(.is-disabled):hover, .btn:hover {
     background-color: var(--brand-strong);
     box-shadow: 0 5px 16px rgba(0, 113, 227, .16);
     transform: translateY(-1px);
@@ -797,7 +797,7 @@ a, .eyebrow, .area-link, .quick-action:hover, .chart-data > summary { color: var
     background: linear-gradient(125deg, #fff 0%, #fbfbfd 78%, #f2f2f4 100%);
 }
 .button, button, .btn { background-color: var(--brand); }
-button:not(:disabled):hover, .button:not(.is-disabled):hover, .btn:hover {
+button:not(:disabled):not(.sidebar-scrim):hover, .button:not(.is-disabled):hover, .btn:hover {
     background-color: var(--brand-strong);
     box-shadow: 0 5px 16px rgba(29, 29, 31, .14);
 }
@@ -852,7 +852,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: #1d1d1f; }
     border-color: #c7c7cc;
     background: #f5f5f7;
 }
-.sidebar-scrim, .sidebar-scrim:hover, .sidebar-scrim:active { background: rgba(0, 0, 0, .4); }
+.sidebar-scrim, .sidebar-scrim:hover, .sidebar-scrim:active { background: rgba(24, 36, 63, .38); }
 .menu-open #primary-sidebar { box-shadow: 1rem 0 3rem rgba(0, 0, 0, .16); }
 .payway-panel, .payway-confirm-panel { background: linear-gradient(120deg, #fff, #f5f5f7); }
 .payway-mark { background: linear-gradient(145deg, #555558, #1d1d1f); }
@@ -866,7 +866,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: #1d1d1f; }
 .workspace-area:hover, .quick-action:hover { box-shadow: 0 10px 26px rgba(0, 0, 0, .07); }
 .chart-data > summary:focus-visible { outline-color: #6e6e73; }
 
-button:not(:disabled):not(.button-secondary):not(.btn-secondary):not(.btn-light):not(.button-danger):not(.access-user):not(.menu-toggle):hover,
+button:not(:disabled):not(.button-secondary):not(.btn-secondary):not(.btn-light):not(.button-danger):not(.access-user):not(.menu-toggle):not(.sidebar-scrim):hover,
 .button:not(.is-disabled):not(.button-secondary):not(.button-danger):hover,
 .btn:not(.btn-secondary):not(.btn-light):hover {
     color: #fff;

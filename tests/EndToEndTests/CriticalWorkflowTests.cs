@@ -171,6 +171,9 @@ public sealed partial class CriticalWorkflowTests(ITestOutputHelper output)
         await Assertions.Expect(scrim).ToHaveAccessibleNameAsync("Close navigation");
         var scrimBounds = await scrim.BoundingBoxAsync();
         Assert.NotNull(scrimBounds);
+        await scrim.HoverAsync(new() { Position = new() { X = scrimBounds.Width - 8, Y = 8 } });
+        var scrimHoverStyles = await scrim.EvaluateAsync<string[]>("element => { const style = getComputedStyle(element); return [style.backgroundColor, style.transform]; }");
+        Assert.Equal(["rgba(24, 36, 63, 0.38)", "none"], scrimHoverStyles);
         await scrim.ClickAsync(new() { Position = new() { X = scrimBounds.Width - 8, Y = 8 } });
         await Assertions.Expect(menu).ToHaveAttributeAsync("aria-expanded", "false");
         await Assertions.Expect(menu).ToHaveAccessibleNameAsync("Open navigation");
