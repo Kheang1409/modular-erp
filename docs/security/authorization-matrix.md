@@ -9,9 +9,12 @@ All API endpoints require authentication. Permissions are tenant-scoped role ass
 | Products | `products.read` | `products.manage`, `products.archive`, `products.import`, `products.export` |
 | CRM | `crm.read` | `crm.manage`, `crm.assign`, `crm.configure`, `crm.archive` |
 | Sales | `sales.quotation.read`, `sales.order.read` | `sales.quotation.manage`, `sales.quotation.confirm`, `sales.order.manage`, `sales.order.confirm`, `sales.order.cancel` |
-| Purchasing | `purchasing.order.read` | `purchasing.order.manage`, `purchasing.order.approve`, `purchasing.order.cancel`, `purchasing.order.archive` |
+| Purchasing | `purchasing.order.read`, `purchasing.contract.read`, `purchasing.supplier.evaluate.read` | `purchasing.order.manage`, `purchasing.order.approve`, `purchasing.order.cancel`, `purchasing.order.archive`, `purchasing.contract.manage`, `purchasing.supplier.evaluate` |
 | Inventory | `inventory.read` | `inventory.configure`, `inventory.move.manage`, `inventory.move.complete`, `inventory.reserve`, `inventory.adjust` |
-| Accounting | `accounting.read`, `accounting.invoice.read`, `accounting.bill.read`, `accounting.payment.read` | `accounting.configure`, `accounting.post`, `accounting.period.close`, `accounting.invoice.manage`, `accounting.invoice.post`, `accounting.bill.manage`, `accounting.bill.post`, `accounting.payment.manage`, `accounting.payment.post`, `accounting.reconcile` |
+| Accounting | `accounting.read`, `accounting.invoice.read`, `accounting.bill.read`, `accounting.payment.read`, `accounting.budget.read` | `accounting.configure`, `accounting.post`, `accounting.period.close`, `accounting.invoice.manage`, `accounting.invoice.post`, `accounting.bill.manage`, `accounting.bill.post`, `accounting.payment.manage`, `accounting.payment.post`, `accounting.reconcile`, `accounting.budget.manage`, `accounting.budget.approve` |
+| HCM | `hcm.read`, `hcm.benefits.read`, `hcm.training.read`, `hcm.performance_reviews.read`, `hcm.payroll.read` | `hcm.manage`, `hcm.leave.approve`, `hcm.benefits.manage`, `hcm.training.manage`, `hcm.performance_reviews.manage`, `hcm.payroll.manage`, `hcm.payroll.approve` |
+| Manufacturing | `manufacturing.read` | `manufacturing.bom.manage`, `manufacturing.workorder.manage`, `manufacturing.workorder.transition`, `manufacturing.quality.manage` |
+| Projects | `projects.read` | `projects.manage` |
 | Reporting | `reporting.sales`, `reporting.purchasing`, `reporting.inventory`, `reporting.financial`, `reporting.receivables`, `reporting.payables`, `reporting.cash` | `reporting.export` (combined with the relevant report permission) |
 
 ## Operational rules

@@ -25,7 +25,7 @@ public sealed class PurchasingModuleTests
         module.ConfigurePermissions(permissions);
         module.ConfigureIntegrationEvents(events);
         Assert.Equal(["erp.contacts", "erp.products"], module.Manifest.Dependencies.Select(dependency => dependency.ModuleId));
-        Assert.Equal(5, permissions.Permissions.Count);
+        Assert.Equal(9, permissions.Permissions.Count);
         Assert.Equal(3, events.Events.Count);
     }
 

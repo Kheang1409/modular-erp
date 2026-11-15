@@ -37,3 +37,20 @@ public contracts, without making downstream consumer effects atomic with an orde
 
 Purchase-order list and detail tables use named, keyboard-focusable scroll regions
 so wide rows scroll locally on mobile rather than widening the page.
+
+## Supplier sourcing
+
+Supplier contracts are stored in the Purchasing schema with tenant/company
+filters, unique supplier-scoped contract numbers, bounded dates and values, and
+concurrency-protected Draft → Active → Terminated transitions. Expiration is
+derived from the end date; no scheduled state mutation is needed. Contract value
+and currency must be supplied together. Contract metadata does not store legal
+document bytes; use the platform attachment service for files.
+
+Supplier evaluations are append-only dated scorecards for quality, delivery, and
+responsiveness (each 1–5). One scorecard per supplier per assessment date is
+allowed. Contract reads/changes use `purchasing.contract.read` and
+`purchasing.contract.manage`; evaluation reads/creation use the separately
+registered `purchasing.supplier.evaluate.read` and `purchasing.supplier.evaluate`
+permissions. The API is under
+`/api/v1/purchasing/suppliers`.

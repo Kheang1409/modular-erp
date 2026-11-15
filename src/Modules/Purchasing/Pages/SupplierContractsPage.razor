@@ -1,0 +1,171 @@
+@page "/purchasing/suppliers/contracts"
+@attribute [Authorize(Policy = PurchasingPermissions.SupplierContractRead)]
+@inject HttpClient Http
+
+<PageTitle>Supplier contracts</PageTitle>
+<article class="card contacts-card entity-page module-workspace">
+    <div class="page-heading"><div><p class="eyebrow">Purchasing</p><h1>Supplier contracts</h1><p class="muted">Track agreement metadata and lifecycle. Store legal files using the platform attachment service.</p></div><nav class="heading-actions" aria-label="Purchasing"><a class="button button-secondary" href="/purchasing/orders">Purchase orders</a></nav></div>
+@if (_loading)
+    {
+        <p role="status">Loading supplier contracts...</p>
+    }
+    else if (_error is not null)
+    {
+        <div class="notice notice-error" role="alert">@_error <button @onclick="Load">Try again</button></div>
+    }
+    else
+    {
+        <AuthorizeView Policy="@PurchasingPermissions.SupplierContractManage">
+            <section class="module-panel">
+                <h2>New draft contract</h2>
+                <p>Use the supplier ID from its Contacts record.</p>
+                <EditForm Model="_form" OnValidSubmit="Create" FormName="supplier-contract" Context="contractForm">
+                    <DataAnnotationsValidator />
+                    <ValidationSummary />
+                    <label>Supplier ID <InputText @bind-Value="_form.SupplierId" /></label>
+                    <label>Contract number <InputText @bind-Value="_form.ContractNumber" maxlength="100" /></label>
+                    <label>Title <InputText @bind-Value="_form.Title" maxlength="200" /></label>
+                    <label>Start date <InputDate @bind-Value="_form.StartsOn" /></label>
+                    <label>End date <InputDate @bind-Value="_form.EndsOn" /></label>
+                    <label>Contract value <InputNumber @bind-Value="_form.ContractValue" min="0" /></label>
+                    <label>Currency code <InputText @bind-Value="_form.CurrencyCode" maxlength="3" /></label>
+                    <button disabled="@_saving">Create draft</button>
+                </EditForm>
+            </section>
+        </AuthorizeView>
+        @if (_message is not null)
+        {
+            <div class="notice notice-success" role="status">@_message</div>
+        }
+        <h2>Agreements</h2>
+        @if (_contracts.Count == 0)
+        {
+            <p>No supplier contracts have been recorded.</p>
+        }
+        else
+        {
+            <div class="table-scroll" tabindex="0" role="region" aria-label="Supplier contract records">
+                <table>
+                    <caption>Supplier contract records</caption>
+                    <thead><tr><th scope="col">Supplier</th><th scope="col">Contract</th><th scope="col">Dates</th><th scope="col">Value</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
+                    <tbody>
+                        @foreach (var contract in _contracts)
+                        {
+                            <tr @key="contract.Id">
+                                <td>@contract.SupplierName</td><td>@contract.ContractNumber â€” @contract.Title</td>
+                                <td>@contract.StartsOn â€“ @contract.EndsOn</td>
+                                <td>@(contract.ContractValue is null ? "â€”" : $"{contract.CurrencyCode} {contract.ContractValue.Value:N2}")</td>
+                                <td>@(contract.IsExpired ? "Expired" : contract.State)</td>
+                                <td>
+                                    @if (contract.State == SupplierContractState.Draft)
+                                    {
+                                        <AuthorizeView Policy="@PurchasingPermissions.SupplierContractManage">
+                                            <button disabled="@_saving" @onclick="() => Transition(contract, SupplierContractState.Active)">Activate</button>
+                                        </AuthorizeView>
+                                    }
+                                    else if (contract.State == SupplierContractState.Active)
+                                    {
+                                        <AuthorizeView Policy="@PurchasingPermissions.SupplierContractManage">
+                                            <button class="button-secondary" disabled="@_saving" @onclick="() => Transition(contract, SupplierContractState.Terminated)">Terminate</button>
+                                        </AuthorizeView>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+</article>
+
+@code {
+    private readonly List<SupplierContractDto> _contracts = [];
+    private ContractForm _form = new();
+    private bool _loading = true;
+    private bool _saving;
+    private string? _error;
+    private string? _message;
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            _contracts.Clear();
+            _contracts.AddRange(await Http.GetFromJsonAsync<List<SupplierContractDto>>("api/v1/purchasing/suppliers/contracts") ?? []);
+        }
+        catch (HttpRequestException)
+        {
+            _error = "Supplier contracts could not be loaded.";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private Task Create()
+    {
+        if (!Guid.TryParse(_form.SupplierId, out var supplierId))
+        {
+            _error = "Enter a valid supplier ID.";
+            return Task.CompletedTask;
+        }
+        return Send(() => Http.PostAsJsonAsync("api/v1/purchasing/suppliers/contracts",
+            new SupplierContractRequest(supplierId, _form.ContractNumber, _form.Title, _form.StartsOn,
+                _form.EndsOn, _form.ContractValue, _form.CurrencyCode)),
+            "Draft supplier contract created.");
+    }
+
+    private Task Transition(SupplierContractDto contract, SupplierContractState state) =>
+        Send(() => Http.PostAsJsonAsync($"api/v1/purchasing/suppliers/contracts/{contract.Id}/{(state == SupplierContractState.Active ? "activate" : "terminate")}",
+            new SupplierContractActionRequest(contract.ConcurrencyStamp)),
+            state == SupplierContractState.Active ? "Supplier contract activated." : "Supplier contract terminated.");
+
+    private async Task Send(Func<Task<HttpResponseMessage>> send, string message)
+    {
+        _saving = true;
+        _error = null;
+        _message = null;
+        try
+        {
+            using var response = await send();
+            if (response.IsSuccessStatusCode)
+            {
+                _message = message;
+                await Load();
+            }
+            else
+            {
+                _error = "The change could not be saved. Check the supplier, dates, currency, and contract status.";
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _error = "The server could not be reached.";
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private sealed class ContractForm
+    {
+        [System.ComponentModel.DataAnnotations.Required]
+        public string SupplierId { get; set; } = "";
+        [System.ComponentModel.DataAnnotations.Required]
+        public string ContractNumber { get; set; } = "";
+        [System.ComponentModel.DataAnnotations.Required]
+        public string Title { get; set; } = "";
+        public DateOnly StartsOn { get; set; } = DateOnly.FromDateTime(DateTime.Today);
+        public DateOnly EndsOn { get; set; } = DateOnly.FromDateTime(DateTime.Today).AddYears(1);
+        [System.ComponentModel.DataAnnotations.Range(typeof(decimal), "0", "999999999999")]
+        public decimal? ContractValue { get; set; }
+        public string? CurrencyCode { get; set; }
+    }
+}

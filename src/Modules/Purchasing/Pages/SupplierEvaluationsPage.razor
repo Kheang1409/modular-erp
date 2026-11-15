@@ -1,0 +1,148 @@
+@page "/purchasing/suppliers/evaluations"
+@attribute [Authorize(Policy = PurchasingPermissions.SupplierEvaluationRead)]
+@inject HttpClient Http
+
+<PageTitle>Supplier evaluations</PageTitle>
+<article class="card contacts-card entity-page module-workspace">
+    <div class="page-heading"><div><p class="eyebrow">Purchasing</p><h1>Supplier evaluations</h1><p class="muted">Record dated 1â€“5 quality, delivery, and responsiveness assessments. Assessments are retained as history.</p></div><nav class="heading-actions" aria-label="Purchasing"><a class="button button-secondary" href="/purchasing/orders">Purchase orders</a></nav></div>
+@if (_loading)
+    {
+        <p role="status">Loading supplier evaluations...</p>
+    }
+    else if (_error is not null)
+    {
+        <div class="notice notice-error" role="alert">@_error <button @onclick="Load">Try again</button></div>
+    }
+    else
+    {
+        <AuthorizeView Policy="@PurchasingPermissions.SupplierEvaluate">
+            <section class="module-panel">
+                <h2>Record an assessment</h2>
+                <p>Use the supplier ID from its Contacts record.</p>
+                <EditForm Model="_form" OnValidSubmit="Create" FormName="supplier-evaluation" Context="evaluationForm">
+                    <DataAnnotationsValidator />
+                    <ValidationSummary />
+                    <label>Supplier ID <InputText @bind-Value="_form.SupplierId" /></label>
+                    <label>Assessment date <InputDate @bind-Value="_form.AssessedOn" /></label>
+                    <label>Quality (1â€“5) <InputNumber @bind-Value="_form.QualityScore" min="1" max="5" /></label>
+                    <label>Delivery (1â€“5) <InputNumber @bind-Value="_form.DeliveryScore" min="1" max="5" /></label>
+                    <label>Responsiveness (1â€“5) <InputNumber @bind-Value="_form.ResponsivenessScore" min="1" max="5" /></label>
+                    <label>Notes <InputTextArea @bind-Value="_form.Notes" maxlength="2000" /></label>
+                    <button disabled="@_saving">Save assessment</button>
+                </EditForm>
+            </section>
+        </AuthorizeView>
+        @if (_message is not null)
+        {
+            <div class="notice notice-success" role="status">@_message</div>
+        }
+        <h2>Assessment history</h2>
+        @if (_evaluations.Count == 0)
+        {
+            <p>No supplier assessments have been recorded.</p>
+        }
+        else
+        {
+            <div class="table-scroll" tabindex="0" role="region" aria-label="Supplier assessment history">
+                <table>
+                    <caption>Supplier performance assessments</caption>
+                    <thead><tr><th scope="col">Supplier</th><th scope="col">Date</th><th scope="col">Quality</th><th scope="col">Delivery</th><th scope="col">Responsiveness</th><th scope="col">Average</th><th scope="col">Notes</th></tr></thead>
+                    <tbody>
+                        @foreach (var evaluation in _evaluations)
+                        {
+                            <tr @key="evaluation.Id"><td>@evaluation.SupplierName</td><td>@evaluation.AssessedOn</td>
+                                <td>@evaluation.QualityScore</td><td>@evaluation.DeliveryScore</td>
+                                <td>@evaluation.ResponsivenessScore</td><td>@evaluation.OverallScore.ToString("N2")</td><td>@evaluation.Notes</td></tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+</article>
+
+@code {
+    private readonly List<SupplierEvaluationDto> _evaluations = [];
+    private EvaluationForm _form = new();
+    private bool _loading = true;
+    private bool _saving;
+    private string? _error;
+    private string? _message;
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            _evaluations.Clear();
+            _evaluations.AddRange(await Http.GetFromJsonAsync<List<SupplierEvaluationDto>>("api/v1/purchasing/suppliers/evaluations") ?? []);
+        }
+        catch (HttpRequestException)
+        {
+            _error = "Supplier evaluations could not be loaded.";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private Task Create()
+    {
+        if (!Guid.TryParse(_form.SupplierId, out var supplierId))
+        {
+            _error = "Enter a valid supplier ID.";
+            return Task.CompletedTask;
+        }
+        return Send(() => Http.PostAsJsonAsync("api/v1/purchasing/suppliers/evaluations",
+            new SupplierEvaluationRequest(supplierId, _form.AssessedOn, _form.QualityScore,
+                _form.DeliveryScore, _form.ResponsivenessScore, _form.Notes)),
+            "Supplier assessment saved.");
+    }
+
+    private async Task Send(Func<Task<HttpResponseMessage>> send, string message)
+    {
+        _saving = true;
+        _error = null;
+        _message = null;
+        try
+        {
+            using var response = await send();
+            if (response.IsSuccessStatusCode)
+            {
+                _message = message;
+                await Load();
+            }
+            else
+            {
+                _error = "The assessment could not be saved. Check the supplier, date, and score values.";
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _error = "The server could not be reached.";
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private sealed class EvaluationForm
+    {
+        [System.ComponentModel.DataAnnotations.Required]
+        public string SupplierId { get; set; } = "";
+        public DateOnly AssessedOn { get; set; } = DateOnly.FromDateTime(DateTime.Today);
+        [System.ComponentModel.DataAnnotations.Range(1, 5)]
+        public int QualityScore { get; set; } = 3;
+        [System.ComponentModel.DataAnnotations.Range(1, 5)]
+        public int DeliveryScore { get; set; } = 3;
+        [System.ComponentModel.DataAnnotations.Range(1, 5)]
+        public int ResponsivenessScore { get; set; } = 3;
+        [System.ComponentModel.DataAnnotations.MaxLength(2000)]
+        public string? Notes { get; set; }
+    }
+}

@@ -238,6 +238,135 @@ namespace Erp.Modules.Purchasing.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Erp.Modules.Purchasing.SupplierContract", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ConcurrencyStamp")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("ContractNumber")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<decimal?>("ContractValue")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CurrencyCode")
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<DateOnly>("EndsOn")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly>("StartsOn")
+                        .HasColumnType("date");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<Guid>("SupplierId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SupplierName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("TerminatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "CompanyId", "State", "EndsOn");
+
+                    b.HasIndex("TenantId", "CompanyId", "SupplierId", "ContractNumber")
+                        .IsUnique();
+
+                    b.ToTable("supplier_contracts", "purchasing", t =>
+                        {
+                            t.HasCheckConstraint("CK_supplier_contracts_dates", "\"StartsOn\"<=\"EndsOn");
+
+                            t.HasCheckConstraint("CK_supplier_contracts_value_currency", "(\"ContractValue\" IS NULL AND \"CurrencyCode\" IS NULL) OR (\"ContractValue\" IS NOT NULL AND \"ContractValue\">=0 AND \"CurrencyCode\" IS NOT NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("Erp.Modules.Purchasing.SupplierEvaluation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("AssessedOn")
+                        .HasColumnType("date");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DeliveryScore")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<int>("QualityScore")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ResponsivenessScore")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("SupplierId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SupplierName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "CompanyId", "SupplierId", "AssessedOn")
+                        .IsUnique();
+
+                    b.ToTable("supplier_evaluations", "purchasing", t =>
+                        {
+                            t.HasCheckConstraint("CK_supplier_evaluations_scores", "\"QualityScore\" BETWEEN 1 AND 5 AND \"DeliveryScore\" BETWEEN 1 AND 5 AND \"ResponsivenessScore\" BETWEEN 1 AND 5");
+                        });
+                });
+
             modelBuilder.Entity("Erp.Modules.Purchasing.PurchaseOrderLine", b =>
                 {
                     b.HasOne("Erp.Modules.Purchasing.PurchaseOrder", null)
