@@ -27,3 +27,7 @@ artifacts/
 .erp/
 modules/external/*
 !modules/external/.gitkeep
+
+# Local build output scratch directories
+build_out/
+build_outDebug/
