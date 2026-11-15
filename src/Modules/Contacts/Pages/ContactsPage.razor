@@ -1,13 +1,16 @@
 @page "/contacts"
 @attribute [Authorize(Policy = ContactsPermissions.Read)]
+@using System.Net.Http.Json
 @inject IContactService Contacts
+@inject HttpClient Http
 
 <PageTitle>Contacts</PageTitle>
-<article class="card contacts-card">
-    <p class="eyebrow">Master data</p>
-    <h1>Contacts</h1>
-    <p class="muted">Customers, suppliers, people, and organizations remain isolated to the active company.</p>
-    <p><a class="button" href="/contacts/new">New contact</a></p>
+<article class="card contacts-card entity-page master-data-page module-workspace">
+    <div class="page-heading"><div><p class="eyebrow">Master data</p><h1>Contacts</h1><p class="muted">Customers, suppliers, people, and organizations remain isolated to the active company.</p></div><div class="heading-actions"><a class="button button-secondary" href="/api/v1/contacts/export">Export CSV</a><a class="button" href="/contacts/new">New contact</a></div></div>
+    <nav class="register-tabs" aria-label="Master data areas"><a class="is-current" aria-current="page" href="/contacts">Contacts</a><a href="/products">Products and services</a></nav>
+    <AuthorizeView Policy="@ContactsPermissions.Import">
+        <section class="module-panel master-data-import" aria-labelledby="contact-import-heading"><div class="section-heading"><div><p class="eyebrow">CSV tools</p><h2 id="contact-import-heading">Import contacts</h2><p class="muted">Import people and organizations. Each row needs a kind, display name, and at least one customer or supplier role.</p></div><a class="button button-secondary" href="/api/v1/contacts/template">Download CSV template</a></div><div class="form-grid"><label class="file-picker"><span class="file-picker-mark" aria-hidden="true">↑</span><span class="file-picker-copy"><strong>@(_file is null ? "Choose a contacts CSV file" : _file.Name)</strong><span>@(_file is null ? "CSV format, up to 5 MB" : $"{(_file.Size / 1024d):N0} KB · ready to import")</span></span><span class="file-picker-action">Browse files</span><InputFile OnChange="SelectFile" accept=".csv,text/csv" /></label><button type="button" disabled="@(_importing || _file is null)" @onclick="ImportAsync">@(_importing ? "Importing…" : "Import CSV")</button></div>@if (_importSummary is not null) { <p class="notice notice-success" role="status">@_importSummary</p> }@if (_importErrors.Count > 0) { <details><summary>@_importErrors.Count row issue(s)</summary><ul>@foreach (var issue in _importErrors) { <li>@issue</li> }</ul></details>}</section>
+    </AuthorizeView>
     <form method="get" class="contact-search">
         <label>Search <input name="search" value="@Search" maxlength="200" /></label>
         <label>Kind
@@ -36,7 +39,7 @@
             @if (_page.Page * _page.PageSize < _page.Total) { <a class="button" href="@PageUrl(_page.Page + 1)">Next</a> }
         </nav>
     }
-    <p><a class="button" href="/api/v1/contacts/export">Export CSV</a></p>
+
 </article>
 
 @code {
@@ -47,8 +50,27 @@
     [SupplyParameterFromQuery] public bool? IsSupplier { get; set; }
     [SupplyParameterFromQuery] public int Page { get; set; } = 1;
     private ContactPage? _page;
+    private IBrowserFile? _file; private bool _importing; private string? _importSummary; private readonly List<string> _importErrors = [];
     private int EffectivePage => Math.Max(1, Page);
     private ContactKind? SelectedKind => Enum.TryParse<ContactKind>(KindQuery, true, out var kind) ? kind : null;
+    private void SelectFile(InputFileChangeEventArgs args) { _file = args.File; _importSummary = null; _importErrors.Clear(); }
+    private async Task ImportAsync()
+    {
+        if (_file is null || _importing) return;
+        _importing = true; _importSummary = null; _importErrors.Clear();
+        try
+        {
+            await using var stream = _file.OpenReadStream(5_000_000); using var content = new MultipartFormDataContent(); using var file = new StreamContent(stream);
+            file.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/csv"); content.Add(file, "file", _file.Name);
+            using var response = await Http.PostAsync("api/v1/contacts/import", content); var result = await response.Content.ReadFromJsonAsync<ContactImportResult>();
+            if (!response.IsSuccessStatusCode) throw new InvalidOperationException(result?.Error ?? "Contact import failed.");
+            _importSummary = $"Imported {result?.Imported ?? 0} contact(s)."; _importErrors.AddRange(result?.Errors ?? []); _file = null;
+            _page = await Contacts.SearchAsync(new(Search, SelectedKind, IncludeArchived, Page: EffectivePage, IsCustomer: IsCustomer, IsSupplier: IsSupplier), CancellationToken.None);
+        }
+        catch (Exception exception) { _importErrors.Add(exception.Message); }
+        finally { _importing = false; }
+    }
+    private sealed record ContactImportResult(int Imported, IReadOnlyList<string> Errors, string? Error = null);
     protected override async Task OnParametersSetAsync() =>
         _page = await Contacts.SearchAsync(new(Search, SelectedKind, IncludeArchived, Page: EffectivePage, IsCustomer: IsCustomer, IsSupplier: IsSupplier), CancellationToken.None);
     private string PageUrl(int page) => $"/contacts?page={page}&search={Uri.EscapeDataString(Search ?? string.Empty)}&kind={SelectedKind}&includeArchived={IncludeArchived}&isCustomer={IsCustomer}&isSupplier={IsSupplier}";

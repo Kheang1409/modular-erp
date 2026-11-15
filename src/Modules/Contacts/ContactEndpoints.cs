@@ -18,6 +18,8 @@ internal static class ContactEndpoints
         group.MapPost("/{id:guid}/reactivate", Reactivate).WithName("ReactivateContact").RequirePermission(ContactsPermissions.Archive);
         group.MapPost("/import", Import).Accepts<IFormFile>("multipart/form-data")
             .WithName("ImportContactsCsv").RequirePermission(ContactsPermissions.Import);
+        group.MapGet("/template", Template).RequirePermission(ContactsPermissions.Import);
+        group.MapGet("/template", Template).RequirePermission(ContactsPermissions.Import);
         group.MapGet("/export", Export).Produces(StatusCodes.Status200OK, contentType: "text/csv")
             .WithName("ExportContactsCsv").RequirePermission(ContactsPermissions.Export);
     }
@@ -53,6 +55,10 @@ internal static class ContactEndpoints
         await using var stream = file.OpenReadStream();
         return Results.Ok(await service.ImportCsvAsync(stream, cancellationToken));
     }
+
+    private static IResult Template() => Results.Text(
+        "kind,displayName,firstName,lastName,organizationName,legalName,email,phone,website,taxNumber,isCustomer,isSupplier,notes,isArchived\r\nPerson,Alex Morgan,Alex,Morgan,,,,,,,,true,false,\r\nOrganization,Northwind Traders,,,Northwind Traders,Northwind Traders,contact@example.com,,,,true,true,,\r\n",
+        "text/csv; charset=utf-8", System.Text.Encoding.UTF8);
 
     private static async Task<IResult> Export(
         IContactService service, string? search, ContactKind? kind, bool includeArchived = false,

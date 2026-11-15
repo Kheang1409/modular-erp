@@ -1,14 +1,23 @@
 @page "/products"
 @attribute [Authorize(Policy = ProductsPermissions.Read)]
+@using Microsoft.AspNetCore.Components.Forms
+@using System.Net.Http.Json
 @inject IProductService Products
 @inject NavigationManager Navigation
+@inject HttpClient Http
 
 <PageTitle>Products</PageTitle>
-<article class="card contacts-card entity-page">
+<article class="card contacts-card entity-page master-data-page module-workspace">
     <div class="page-heading">
         <div><p class="eyebrow">Product master</p><h1>Products and services</h1><p class="muted">One clean catalog for selling, buying, stocking, and reporting.</p></div>
-        <a class="button" href="/products/new"><span aria-hidden="true">＋</span> New product</a>
+        <div class="heading-actions"><a class="button button-secondary" href="@ExportUrl">Export CSV</a><a class="button" href="/products/new"><span aria-hidden="true">＋</span> New product</a></div>
     </div>
+
+    <nav class="register-tabs" aria-label="Master data areas"><a href="/contacts">Contacts</a><a class="is-current" aria-current="page" href="/products">Products and services</a></nav>
+
+    <AuthorizeView Policy="products.import">
+        <section class="module-panel master-data-import" aria-labelledby="product-import-heading"><div class="section-heading"><div><p class="eyebrow">CSV tools</p><h2 id="product-import-heading">Import products and services</h2><p class="muted">Use the template columns. Type must be Product or Service; prices use decimal numbers. Existing SKUs and invalid rows are reported after import.</p></div><a class="button button-secondary" href="data:text/csv;charset=utf-8,type%2Csku%2Cname%2Cdescription%2Cbarcode%2CsalePrice%2Ccost%2CcurrencyCode%2CsalesUnitCode%2CpurchaseUnitCode%2CtracksInventory%2CisArchived%0AProduct%2CSKU-001%2CExample%20product%2C%2C%2C0%2C0%2CUSD%2CEA%2CEA%2Cfalse%2Cfalse" download="products-template.csv">Download CSV template</a></div><div class="form-grid"><label class="file-picker"><span class="file-picker-mark" aria-hidden="true">↑</span><span class="file-picker-copy"><strong>@(_file is null ? "Choose a product CSV file" : _file.Name)</strong><span>@(_file is null ? "CSV format, up to 5 MB" : $"{(_file.Size / 1024d):N0} KB · ready to import")</span></span><span class="file-picker-action">Browse files</span><InputFile OnChange="SelectFile" accept=".csv,text/csv" /></label><button type="button" disabled="@(_importing || _file is null)" @onclick="ImportAsync">@(_importing ? "Importing…" : "Import CSV")</button></div>@if (_importSummary is not null) { <p class="notice notice-success" role="status">@_importSummary</p> }@if (_importErrors.Count > 0) { <details><summary>@_importErrors.Count row issue(s)</summary><ul>@foreach (var issue in _importErrors) { <li>@issue</li> }</ul></details>}</section>
+    </AuthorizeView>
 
     <EditForm Model="this" OnSubmit="SearchAsync" FormName="product-search" class="filter-bar">
         <label class="filter-search"><span>Search products</span><InputText @bind-Value="Search" placeholder="Name, SKU, barcode, or description" /></label>
@@ -48,6 +57,8 @@
     [SupplyParameterFromQuery] public string? Sort { get; set; } = "name";
     [SupplyParameterFromQuery] public int Page { get; set; } = 1;
     private ProductPage? _page; private ProductType? _type; private bool _loading; private string? _error;
+    private IBrowserFile? _file; private bool _importing; private string? _importSummary; private readonly List<string> _importErrors = [];
+    private string ExportUrl => $"/api/v1/products/export?search={Uri.EscapeDataString(Search ?? string.Empty)}&type={_type}&includeArchived={IncludeArchived}&sort={EffectiveSort}";
     private static readonly string[] AllowedSorts = ["name", "sku", "price", "created", "updated"];
     private int EffectivePage => Math.Max(1, Page);
     private string EffectiveSort => AllowedSorts.Contains(Sort, StringComparer.OrdinalIgnoreCase) ? Sort! : "name";
@@ -56,4 +67,7 @@
     private async Task SearchAsync() { var url = $"/products?page=1&search={Uri.EscapeDataString(Search ?? string.Empty)}&type={_type}&includeArchived={IncludeArchived}&sort={EffectiveSort}"; Navigation.NavigateTo(url); await Task.CompletedTask; }
     private async Task LoadAsync() { _loading = true; _error = null; try { _page = await Products.SearchAsync(new(Search, _type, IncludeArchived, Sort: EffectiveSort, Page: EffectivePage), CancellationToken.None); } catch (ProductValidationException ex) { _error = string.Join(" ", ex.Errors.Values.SelectMany(messages => messages)); } catch (Exception ex) { _error = ex.Message; } finally { _loading = false; } }
     private string PageUrl(int page) => $"/products?page={page}&search={Uri.EscapeDataString(Search ?? string.Empty)}&type={_type}&includeArchived={IncludeArchived}&sort={EffectiveSort}";
+    private void SelectFile(InputFileChangeEventArgs args) { _file = args.File; _importSummary = null; _importErrors.Clear(); }
+    private async Task ImportAsync() { if (_file is null || _importing) return; _importing = true; _error = _importSummary = null; _importErrors.Clear(); try { await using var stream = _file.OpenReadStream(5_000_000); using var content = new MultipartFormDataContent(); using var file = new StreamContent(stream); file.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/csv"); content.Add(file, "file", _file.Name); using var response = await Http.PostAsync("api/v1/products/import", content); var result = await response.Content.ReadFromJsonAsync<ProductImportResult>(); if (!response.IsSuccessStatusCode) throw new InvalidOperationException(result?.Errors.FirstOrDefault() ?? "Product import failed."); _importSummary = $"Imported {result?.Imported ?? 0} product(s) or service(s)."; _importErrors.AddRange(result?.Errors ?? []); _file = null; await LoadAsync(); } catch (Exception ex) { _error = ex.Message; } finally { _importing = false; } }
+    private sealed record ProductImportResult(int Imported, IReadOnlyList<string> Errors);
 }
