@@ -13,7 +13,7 @@ namespace Erp.Modules.Accounting;
 
 public sealed class AccountingModule : IErpModule
 {
-    public ModuleManifest Manifest { get; } = new("erp.accounting", "Accounting", "0.1.0", "Double-entry accounting and financial controls.", "ERP Community", "Apache-2.0", "0.1.0", [new("erp.sales", ">=0.1.0 <1.0.0"), new("erp.purchasing", ">=0.1.0 <1.0.0")], [AccountingPermissions.Read, AccountingPermissions.Configure, AccountingPermissions.Post, AccountingPermissions.ClosePeriods, AccountingPermissions.InvoiceRead, AccountingPermissions.InvoiceManage, AccountingPermissions.InvoicePost, AccountingPermissions.BillRead, AccountingPermissions.BillManage, AccountingPermissions.BillPost, AccountingPermissions.PaymentRead, AccountingPermissions.PaymentManage, AccountingPermissions.PaymentPost, AccountingPermissions.Reconcile]);
+    public ModuleManifest Manifest { get; } = new("erp.accounting", "Accounting", "0.1.0", "Double-entry accounting, budgeting, and financial controls.", "ERP Community", "Apache-2.0", "0.1.0", [new("erp.sales", ">=0.1.0 <1.0.0"), new("erp.purchasing", ">=0.1.0 <1.0.0")], [AccountingPermissions.Read, AccountingPermissions.Configure, AccountingPermissions.Post, AccountingPermissions.ClosePeriods, AccountingPermissions.InvoiceRead, AccountingPermissions.InvoiceManage, AccountingPermissions.InvoicePost, AccountingPermissions.BillRead, AccountingPermissions.BillManage, AccountingPermissions.BillPost, AccountingPermissions.PaymentRead, AccountingPermissions.PaymentManage, AccountingPermissions.PaymentPost, AccountingPermissions.Reconcile, AccountingPermissions.BudgetRead, AccountingPermissions.BudgetManage, AccountingPermissions.BudgetApprove]);
     public Assembly ComponentAssembly => typeof(AccountingModule).Assembly;
     public void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
@@ -22,12 +22,16 @@ public sealed class AccountingModule : IErpModule
             postgres => postgres.MigrationsHistoryTable("__EFMigrationsHistory", "accounting")));
         services.AddScoped<IAccountingConfigurationService, AccountingConfigurationService>();
         services.AddScoped<IGeneralLedgerService, GeneralLedgerService>();
+        services.AddScoped<IPayrollJournalPoster, PayrollJournalPoster>();
+        services.AddScoped<IPayrollAccountMappingValidator, PayrollAccountMappingValidator>();
+        services.AddScoped<IPayrollJournalResolver, PayrollJournalResolver>();
         services.AddScoped<ICustomerInvoiceService, CustomerInvoiceService>();
         services.AddScoped<ISupplierBillService, SupplierBillService>();
         services.AddScoped<IPaymentService, PaymentService>();
         services.Configure<PayWayOptions>(configuration.GetSection("PayWay"));
         services.AddHttpClient<IPayWayService, PayWayService>();
         services.AddScoped<IFinancialControlsService, FinancialControlsService>();
+        services.AddScoped<IBudgetService, BudgetService>();
         services.AddScoped<IAccountingPeriodStatus, AccountingPeriodStatus>();
         services.AddScoped<IAccountingReportingData, AccountingReportingData>();
         services.AddScoped<IModuleDatabaseInitializer, AccountingDatabaseInitializer>();
@@ -58,10 +62,14 @@ public sealed class AccountingModule : IErpModule
         permissions.Add(new(AccountingPermissions.PaymentManage, "Create payments and allocations", Manifest.Id));
         permissions.Add(new(AccountingPermissions.PaymentPost, "Post or reverse payments", Manifest.Id));
         permissions.Add(new(AccountingPermissions.Reconcile, "Create and finalize bank reconciliations", Manifest.Id));
+        permissions.Add(new(AccountingPermissions.BudgetRead, "View budgets and actuals", Manifest.Id));
+        permissions.Add(new(AccountingPermissions.BudgetManage, "Create and edit draft budgets", Manifest.Id));
+        permissions.Add(new(AccountingPermissions.BudgetApprove, "Approve budgets", Manifest.Id));
     }
     public void ConfigureNavigation(INavigationRegistry navigation)
     {
         navigation.Add(new("Financial controls", "/accounting/controls", "Accounting", 84, AccountingPermissions.Read));
+        navigation.Add(new("Budgets", "/accounting/budgets", "Accounting", 83, AccountingPermissions.BudgetRead));
         navigation.Add(new("Bank reconciliation", "/accounting/reconciliation", "Accounting", 85, AccountingPermissions.Reconcile));
         navigation.Add(new("Payments", "/accounting/payments", "Accounting", 86, AccountingPermissions.PaymentRead));
         navigation.Add(new("Supplier bills", "/accounting/bills", "Accounting", 87, AccountingPermissions.BillRead));
@@ -87,6 +95,9 @@ public static class AccountingPermissions
     public const string PaymentManage = "accounting.payment.manage";
     public const string PaymentPost = "accounting.payment.post";
     public const string Reconcile = "accounting.reconcile";
+    public const string BudgetRead = "accounting.budget.read";
+    public const string BudgetManage = "accounting.budget.manage";
+    public const string BudgetApprove = "accounting.budget.approve";
 }
 
 internal sealed class AccountingDatabaseInitializer(AccountingDbContext db) : IModuleDatabaseInitializer

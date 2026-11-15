@@ -1,0 +1,185 @@
+@page "/accounting/budgets"
+@attribute [Authorize(Policy = AccountingPermissions.BudgetRead)]
+@inject HttpClient Http
+
+<PageTitle>Budgets</PageTitle>
+<article class="card contacts-card">
+    <p class="eyebrow">Accounting</p>
+    <h1>Budgets</h1>
+    <p>Create draft budgets by fiscal period, then approve them separately. Actuals include posted journal activity only.</p>
+    @if (_loading)
+    {
+        <p role="status">Loading budgets...</p>
+    }
+    else if (_error is not null)
+    {
+        <div class="notice notice-error" role="alert">@_error <button @onclick="Load">Try again</button></div>
+    }
+    else
+    {
+        <AuthorizeView Policy="@AccountingPermissions.BudgetManage">
+            <section>
+                <h2>New budget draft</h2>
+                @if (_periods.Count == 0 || _accounts.Count == 0)
+                {
+                    <p>Create a fiscal period and active revenue or expense accounts before adding a budget.</p>
+                }
+                else
+                {
+                    <EditForm Model="_form" OnValidSubmit="Create" FormName="budget-plan" Context="budgetForm">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary />
+                        <label>Name <InputText @bind-Value="_form.Name" maxlength="200" /></label>
+                        <label>Fiscal period
+                            <InputSelect @bind-Value="_form.FiscalPeriodId">
+                                @foreach (var period in _periods)
+                                {
+                                    <option value="@period.Id">@period.Name (@period.StartsOn - @period.EndsOn)</option>
+                                }
+                            </InputSelect>
+                        </label>
+                        <label>Budget account
+                            <InputSelect @bind-Value="_form.AccountId">
+                                @foreach (var account in _accounts.Where(x => x.IsActive && x.Type is AccountType.Expense or AccountType.Revenue))
+                                {
+                                    <option value="@account.Id">@account.Code - @account.Name</option>
+                                }
+                            </InputSelect>
+                        </label>
+                        <label>Amount <InputNumber @bind-Value="_form.Amount" min="0" /></label>
+                        <button disabled="@_saving">Create draft</button>
+                    </EditForm>
+                }
+            </section>
+        </AuthorizeView>
+        @if (_message is not null)
+        {
+            <div class="notice notice-success" role="status">@_message</div>
+        }
+        <h2>Budget versus actual</h2>
+        @if (_plans.Count == 0)
+        {
+            <p>No budget plans exist for this company.</p>
+        }
+        else
+        {
+            <div class="table-scroll" tabindex="0" role="region" aria-label="Budget plans and actuals">
+                <table>
+                    <caption>Budget plans and actuals in company base currency</caption>
+                    <thead><tr><th scope="col">Plan</th><th scope="col">Period</th><th scope="col">Status</th><th scope="col">Budget</th><th scope="col">Actual</th><th scope="col">Variance</th><th scope="col">Actions</th></tr></thead>
+                    <tbody>
+                        @foreach (var plan in _plans)
+                        {
+                            <tr @key="plan.Id">
+                                <td>@plan.Name</td><td>@plan.FiscalPeriodName</td><td>@plan.State</td>
+                                <td>@plan.CurrencyCode @plan.BudgetTotal.ToString("N2")</td>
+                                <td>@plan.CurrencyCode @plan.ActualTotal.ToString("N2")</td>
+                                <td>@plan.CurrencyCode @plan.Variance.ToString("N2")</td>
+                                <td>
+                                    <details><summary>Account detail</summary>
+                                        <ul>@foreach (var line in plan.Lines)
+                                        {
+                                            <li>@line.AccountCode - @line.AccountName: budget @line.BudgetAmount.ToString("N2"), actual @line.ActualAmount.ToString("N2"), variance @line.Variance.ToString("N2")</li>
+                                        }</ul>
+                                    </details>
+                                    @if (plan.State == BudgetPlanState.Draft)
+                                    {
+                                        <AuthorizeView Policy="@AccountingPermissions.BudgetApprove">
+                                            <button disabled="@_saving" @onclick="() => Approve(plan)">Approve</button>
+                                        </AuthorizeView>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+</article>
+
+@code {
+    private readonly List<BudgetPlanDto> _plans = [];
+    private readonly List<FiscalPeriodDto> _periods = [];
+    private readonly List<AccountDto> _accounts = [];
+    private BudgetForm _form = new();
+    private bool _loading = true;
+    private bool _saving;
+    private string? _error;
+    private string? _message;
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            _plans.Clear();
+            _plans.AddRange(await Http.GetFromJsonAsync<List<BudgetPlanDto>>("api/v1/accounting/budgets") ?? []);
+            _periods.Clear();
+            _periods.AddRange(await Http.GetFromJsonAsync<List<FiscalPeriodDto>>("api/v1/accounting/periods") ?? []);
+            _accounts.Clear();
+            _accounts.AddRange(await Http.GetFromJsonAsync<List<AccountDto>>("api/v1/accounting/accounts") ?? []);
+            if (_form.FiscalPeriodId == Guid.Empty) _form.FiscalPeriodId = _periods.FirstOrDefault()?.Id ?? Guid.Empty;
+            if (_form.AccountId == Guid.Empty) _form.AccountId = _accounts.FirstOrDefault(x => x.IsActive && x.Type is AccountType.Expense or AccountType.Revenue)?.Id ?? Guid.Empty;
+        }
+        catch (HttpRequestException)
+        {
+            _error = "Budgets could not be loaded.";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private Task Create() => Send(
+        () => Http.PostAsJsonAsync("api/v1/accounting/budgets",
+            new BudgetPlanRequest(_form.FiscalPeriodId, _form.Name, [new(_form.AccountId, _form.Amount)])),
+        "Budget draft created.");
+
+    private Task Approve(BudgetPlanDto plan) => Send(
+        () => Http.PostAsJsonAsync($"api/v1/accounting/budgets/{plan.Id}/approve",
+            new AccountingActionRequest(plan.ConcurrencyStamp)),
+        $"{plan.Name} approved.");
+
+    private async Task Send(Func<Task<HttpResponseMessage>> send, string message)
+    {
+        _saving = true;
+        _error = null;
+        _message = null;
+        try
+        {
+            using var response = await send();
+            if (response.IsSuccessStatusCode)
+            {
+                _message = message;
+                await Load();
+            }
+            else
+            {
+                _error = "The budget change could not be saved. Check the fiscal period, account, and amount.";
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _error = "The server could not be reached.";
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private sealed class BudgetForm
+    {
+        [System.ComponentModel.DataAnnotations.Required]
+        public string Name { get; set; } = "";
+        public Guid FiscalPeriodId { get; set; }
+        public Guid AccountId { get; set; }
+        [System.ComponentModel.DataAnnotations.Range(typeof(decimal), "0", "999999999999")]
+        public decimal Amount { get; set; }
+    }
+}

@@ -28,7 +28,7 @@ public sealed class AccountingModuleTests
 
         Assert.Equal("erp.accounting", module.Manifest.Id);
         Assert.Equal(["erp.sales", "erp.purchasing"], module.Manifest.Dependencies.Select(x => x.ModuleId));
-        Assert.Equal(14, permissions.Permissions.Count);
+        Assert.Equal(17, permissions.Permissions.Count);
         Assert.All(permissions.Permissions, permission => Assert.Equal(module.Manifest.Id, permission.ModuleId));
         Assert.Contains(permissions.Permissions, permission => permission.Name == AccountingPermissions.Post);
         Assert.Contains(permissions.Permissions, permission => permission.Name == AccountingPermissions.ClosePeriods);
@@ -36,6 +36,9 @@ public sealed class AccountingModuleTests
         Assert.Contains(permissions.Permissions, permission => permission.Name == AccountingPermissions.BillPost);
         Assert.Contains(permissions.Permissions, permission => permission.Name == AccountingPermissions.PaymentPost);
         Assert.Contains(permissions.Permissions, permission => permission.Name == AccountingPermissions.Reconcile);
+        Assert.Contains(permissions.Permissions, permission => permission.Name == AccountingPermissions.BudgetRead);
+        Assert.Contains(permissions.Permissions, permission => permission.Name == AccountingPermissions.BudgetManage);
+        Assert.Contains(permissions.Permissions, permission => permission.Name == AccountingPermissions.BudgetApprove);
         Assert.Equal(6, events.Events.Count);
     }
 

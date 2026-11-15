@@ -2,6 +2,16 @@
 
 Accounting owns the chart of accounts, fiscal periods, journals, general ledger, customer invoices, supplier bills, payments, allocations, tax codes, dated exchange rates, and bank reconciliations in the `accounting` PostgreSQL schema. All records are tenant- and company-scoped.
 
+## Budgets
+
+Budget plans are scoped to a company fiscal period and use that company's base
+currency. Drafts can be edited with revenue and expense account lines; approval
+is permission-separated from preparation and is concurrency-protected. Approving a replacement supersedes the period's
+previous approved plan. Budget versus actual values are
+calculated from posted journal lines in the period, using each account's normal
+balance, so unposted activity is excluded. The `/api/v1/accounting/budgets`
+endpoints require the corresponding budget read, manage, or approve permission.
+
 ## Posting controls
 
 Journal entries require at least two one-sided lines and equal debit and credit totals. Base-currency amounts are calculated on the server from the retained transaction-currency rate. Posting is idempotent, requires an open fiscal period, and turns the entry immutable. Corrections use linked compensating reversals.

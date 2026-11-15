@@ -673,6 +673,27 @@ public sealed class AtomicAccountingPostgresTests(AtomicAccountingPostgresFixtur
         await AssertPlatformCounts(scope, 1, 1);
     }
 
+    [Fact]
+    public async Task JournalReversalReplayRequiresTheSameRequestAndDifferentKeyCannotReverseTwice()
+    {
+        await using var scope = await TestScope.CreateAsync(fixture.ConnectionString);
+        var request = new ReverseJournalEntryRequest(BusinessDate, "Correction", "reversal-replay-key");
+
+        var first = await scope.Ledger.ReverseAsync(scope.PostedEntry.Id, request, CancellationToken.None);
+        var replay = await scope.Ledger.ReverseAsync(scope.PostedEntry.Id, request, CancellationToken.None);
+
+        Assert.Equal(first.Id, replay.Id);
+        await Assert.ThrowsAsync<AccountingValidationException>(() => scope.Ledger.ReverseAsync(
+            scope.PostedEntry.Id, request with { BusinessDate = BusinessDate.AddDays(1) }, CancellationToken.None));
+        await Assert.ThrowsAsync<AccountingValidationException>(() => scope.Ledger.ReverseAsync(
+            scope.PostedEntry.Id, request with { Description = "Different correction" }, CancellationToken.None));
+        await Assert.ThrowsAsync<AccountingValidationException>(() => scope.Ledger.ReverseAsync(
+            scope.PostedEntry.Id, request with { IdempotencyKey = "second-reversal-key" }, CancellationToken.None));
+        await using var reader = scope.ReadAccounting();
+        Assert.Equal(1, await reader.JournalEntries.CountAsync(item => item.ReversesEntryId == scope.PostedEntry.Id));
+        await AssertPlatformCounts(scope, 1, 1);
+    }
+
     [Theory]
     [InlineData("entry-post")]
     [InlineData("entry-reverse")]

@@ -11,6 +11,25 @@ internal static class AccountingEndpoints
     public static void MapAccountingEndpoints(this IEndpointRouteBuilder endpoints)
     {
         var group = endpoints.MapGroup("/api/v1/accounting").WithTags("Accounting");
+        group.MapGet("/budgets", (IBudgetService service, CancellationToken token) => Run(() => service.ListAsync(token)))
+            .WithName("ListBudgets").WithSummary("List budget plans with actuals and variance")
+            .RequirePermission(AccountingPermissions.BudgetRead);
+        group.MapGet("/budgets/{id:guid}", async (Guid id, IBudgetService service, CancellationToken token) =>
+                await service.GetAsync(id, token) is { } plan ? Results.Ok(plan) : Results.NotFound())
+            .WithName("GetBudget").WithSummary("Get a budget plan with current posted actuals")
+            .RequirePermission(AccountingPermissions.BudgetRead);
+        group.MapPost("/budgets", (BudgetPlanRequest request, IBudgetService service, CancellationToken token) =>
+                Run(() => service.CreateAsync(request, token), true, result => $"/api/v1/accounting/budgets/{result.Id}"))
+            .WithName("CreateBudget").WithSummary("Create a draft budget plan")
+            .RequirePermission(AccountingPermissions.BudgetManage);
+        group.MapPut("/budgets/{id:guid}", (Guid id, BudgetPlanRequest request, IBudgetService service, CancellationToken token) =>
+                Run(() => service.UpdateAsync(id, request, token)))
+            .WithName("UpdateBudget").WithSummary("Update a draft budget plan")
+            .RequirePermission(AccountingPermissions.BudgetManage);
+        group.MapPost("/budgets/{id:guid}/approve", (Guid id, AccountingActionRequest request, IBudgetService service, CancellationToken token) =>
+                Run(() => service.ApproveAsync(id, request, token)))
+            .WithName("ApproveBudget").WithSummary("Approve a budget plan for its fiscal period")
+            .RequirePermission(AccountingPermissions.BudgetApprove);
         group.MapGet("/tax-codes", (IFinancialControlsService service, CancellationToken token) => Run(() => service.TaxCodesAsync(token))).RequirePermission(AccountingPermissions.Read);
         group.MapPost("/tax-codes", (TaxCodeRequest request, IFinancialControlsService service, CancellationToken token) => Run(() => service.SaveTaxCodeAsync(null, request, token), true)).RequirePermission(AccountingPermissions.Configure);
         group.MapPut("/tax-codes/{id:guid}", (Guid id, TaxCodeRequest request, IFinancialControlsService service, CancellationToken token) => Run(() => service.SaveTaxCodeAsync(id, request, token))).RequirePermission(AccountingPermissions.Configure);
@@ -72,11 +91,13 @@ internal static class AccountingEndpoints
         group.MapPut("/journals/{id:guid}", (Guid id, JournalRequest request, IAccountingConfigurationService service, CancellationToken token) => Run(() => service.SaveJournalAsync(id, request, token))).RequirePermission(AccountingPermissions.Configure);
     }
 
-    private static async Task<IResult> Run<T>(Func<Task<T>> action, bool created = false)
+    private static async Task<IResult> Run<T>(Func<Task<T>> action, bool created = false, Func<T, string>? location = null)
     {
-        try { var result = await action(); return created ? Results.Created("/api/v1/accounting", result) : Results.Ok(result); }
+        try { var result = await action(); return created ? Results.Created(location?.Invoke(result) ?? "/api/v1/accounting", result) : Results.Ok(result); }
         catch (AccountingValidationException exception) { return Results.ValidationProblem(exception.Errors); }
         catch (AccountingConcurrencyException exception) { return Results.Conflict(new { error = exception.Message }); }
+        catch (BudgetValidationException exception) { return Results.ValidationProblem(exception.Errors); }
+        catch (BudgetConcurrencyException exception) { return Results.Conflict(new { error = exception.Message }); }
         catch (KeyNotFoundException) { return Results.NotFound(); }
     }
 

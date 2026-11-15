@@ -21,11 +21,17 @@ public sealed class AccountingAuthorizationTests
         builder.Services.AddScoped<IPaymentService>(_ => null!);
         builder.Services.AddScoped<IPayWayService>(_ => null!);
         builder.Services.AddScoped<IFinancialControlsService>(_ => null!);
+        builder.Services.AddScoped<IBudgetService>(_ => null!);
         var app = builder.Build();
         new AccountingModule().ConfigureEndpoints(app);
 
         var expected = new Dictionary<(string Route, string Method), string>
         {
+            [("/api/v1/accounting/budgets", "GET")] = AccountingPermissions.BudgetRead,
+            [("/api/v1/accounting/budgets/{id:guid}", "GET")] = AccountingPermissions.BudgetRead,
+            [("/api/v1/accounting/budgets", "POST")] = AccountingPermissions.BudgetManage,
+            [("/api/v1/accounting/budgets/{id:guid}", "PUT")] = AccountingPermissions.BudgetManage,
+            [("/api/v1/accounting/budgets/{id:guid}/approve", "POST")] = AccountingPermissions.BudgetApprove,
             [("/api/v1/accounting/tax-codes", "GET")] = AccountingPermissions.Read,
             [("/api/v1/accounting/tax-codes", "POST")] = AccountingPermissions.Configure,
             [("/api/v1/accounting/tax-codes/{id:guid}", "PUT")] = AccountingPermissions.Configure,

@@ -108,11 +108,21 @@ public sealed class GeneralLedgerService(AccountingDbContext db, ITenantContext 
     public async Task<JournalEntryDto> ReverseAsync(Guid id, ReverseJournalEntryRequest request, CancellationToken cancellationToken)
     {
         var key = RequiredKey(request.IdempotencyKey);
+        var description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim();
+        if (description?.Length > 500) throw Error("description", "Reversal description is limited to 500 characters.");
         await using var transaction = await transactions.BeginAsync(db, cancellationToken);
+        await LockReversalAsync(id, key, cancellationToken);
         var prior = await db.JournalEntries.Include(x => x.Lines).SingleOrDefaultAsync(x => x.IdempotencyKey == key, cancellationToken);
         if (prior is not null)
         {
-            if (prior.ReversesEntryId != id) throw Error("idempotencyKey", "This reversal key belongs to another journal entry.");
+            if (prior.ReversesEntryId != id)
+                throw Error("idempotencyKey", "This reversal key was already used for another journal entry.");
+            var originalNumber = await db.JournalEntries.AsNoTracking().Where(x => x.Id == id)
+                .Select(x => x.Number).SingleOrDefaultAsync(cancellationToken);
+            var requestedDescription = description ?? $"Reversal of {originalNumber}";
+            if (originalNumber is null || prior.BusinessDate != request.BusinessDate ||
+                !StringComparer.Ordinal.Equals(prior.Description, requestedDescription))
+                throw Error("idempotencyKey", "This reversal key was already used for a different reversal request.");
             var replay = Dto(prior, null);
             await transaction.CommitAsync(cancellationToken);
             return replay;
@@ -123,7 +133,7 @@ public sealed class GeneralLedgerService(AccountingDbContext db, ITenantContext 
         await EnsureOpen(request.BusinessDate, cancellationToken);
         var now = clock.UtcNow;
         var reversalId = Guid.NewGuid();
-        var reversal = new JournalEntry { Id = reversalId, TenantId = Tenant(), CompanyId = Company(), Number = $"RV-{now:yyyyMMdd}-{reversalId.ToString("N")[..8].ToUpperInvariant()}", JournalId = original.JournalId, BusinessDate = request.BusinessDate, Description = string.IsNullOrWhiteSpace(request.Description) ? $"Reversal of {original.Number}" : request.Description.Trim(), CurrencyCode = original.CurrencyCode, ExchangeRate = original.ExchangeRate, State = JournalEntryState.Posted, IdempotencyKey = key, PostingKey = $"reverse:{key}", ReversesEntryId = original.Id, CreatedAtUtc = now, PostedAtUtc = now, ConcurrencyStamp = Stamp() };
+        var reversal = new JournalEntry { Id = reversalId, TenantId = Tenant(), CompanyId = Company(), Number = $"RV-{now:yyyyMMdd}-{reversalId.ToString("N")[..8].ToUpperInvariant()}", JournalId = original.JournalId, BusinessDate = request.BusinessDate, Description = description ?? $"Reversal of {original.Number}", CurrencyCode = original.CurrencyCode, ExchangeRate = original.ExchangeRate, State = JournalEntryState.Posted, IdempotencyKey = key, PostingKey = $"reverse:{key}", ReversesEntryId = original.Id, CreatedAtUtc = now, PostedAtUtc = now, ConcurrencyStamp = Stamp() };
         foreach (var line in original.Lines.OrderBy(x => x.Sequence)) reversal.Lines.Add(new JournalEntryLine { Id = Guid.NewGuid(), TenantId = reversal.TenantId, CompanyId = reversal.CompanyId, JournalEntryId = reversalId, Sequence = line.Sequence, AccountId = line.AccountId, AccountCode = line.AccountCode, AccountName = line.AccountName, Description = line.Description, Debit = line.Credit, Credit = line.Debit, BaseDebit = line.BaseCredit, BaseCredit = line.BaseDebit });
         db.JournalEntries.Add(reversal);
         await Save(cancellationToken);
@@ -142,6 +152,15 @@ public sealed class GeneralLedgerService(AccountingDbContext db, ITenantContext 
     }
     private static void ValidateRequest(JournalEntryRequest request) { if (request.BusinessDate == default) throw Error("businessDate", "Business date is required."); if (string.IsNullOrWhiteSpace(request.Description) || request.Description.Length > 500) throw Error("description", "Description is required and limited to 500 characters."); if (string.IsNullOrWhiteSpace(request.CurrencyCode) || request.CurrencyCode.Trim().Length != 3) throw Error("currencyCode", "A three-letter currency code is required."); if (request.ExchangeRate <= 0) throw Error("exchangeRate", "Exchange rate must be positive."); ValidateBalance((request.Lines ?? []).Select(x => (x.Debit, x.Credit))); }
     private async Task EnsureOpen(DateOnly date, CancellationToken cancellationToken) { if (!await db.FiscalPeriods.AsNoTracking().AnyAsync(x => x.State == FiscalPeriodState.Open && x.StartsOn <= date && x.EndsOn >= date, cancellationToken)) throw Error("businessDate", "The business date must be in an open fiscal period."); }
+    private async Task LockReversalAsync(Guid journalEntryId, string key, CancellationToken cancellationToken)
+    {
+        var sourceLock = $"{Tenant():N}:{Company():N}:journal-reversal-source:{journalEntryId:N}";
+        var keyLock = $"{Tenant():N}:{Company():N}:journal-reversal-key:{key}";
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock(hashtextextended({sourceLock}, 0))", cancellationToken);
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock(hashtextextended({keyLock}, 0))", cancellationToken);
+    }
     private Task<JournalEntry> Find(Guid id, CancellationToken cancellationToken) => db.JournalEntries.Include(x => x.Lines).SingleOrDefaultAsync(x => x.Id == id, cancellationToken).ContinueWith(task => task.Result ?? throw new KeyNotFoundException(), cancellationToken, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     private async Task<Dictionary<Guid, Guid>> ReversalMap(CancellationToken cancellationToken) => await db.JournalEntries.AsNoTracking().Where(x => x.ReversesEntryId != null).ToDictionaryAsync(x => x.ReversesEntryId!.Value, x => x.Id, cancellationToken);
     private async Task Save(CancellationToken cancellationToken) { try { await db.SaveChangesAsync(cancellationToken); } catch (DbUpdateConcurrencyException) { throw new AccountingConcurrencyException(); } catch (DbUpdateException exception) when (exception.InnerException?.Message.Contains("duplicate", StringComparison.OrdinalIgnoreCase) == true) { throw Error("idempotencyKey", "The operation key or entry number already exists."); } }

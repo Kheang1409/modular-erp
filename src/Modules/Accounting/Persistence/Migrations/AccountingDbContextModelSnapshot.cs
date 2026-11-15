@@ -180,6 +180,93 @@ namespace Erp.Modules.Accounting.Persistence.Migrations
                     b.ToTable("bank_reconciliation_lines", "accounting");
                 });
 
+            modelBuilder.Entity("Erp.Modules.Accounting.BudgetPlan", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ApprovedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ConcurrencyStamp")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<Guid>("FiscalPeriodId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "CompanyId", "FiscalPeriodId", "State")
+                        .IsUnique()
+                        .HasFilter("\"State\" = 'Approved'");
+
+                    b.ToTable("budget_plans", "accounting");
+                });
+
+            modelBuilder.Entity("Erp.Modules.Accounting.BudgetPlanLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("BudgetAmount")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
+                    b.Property<Guid>("BudgetPlanId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "CompanyId", "BudgetPlanId", "AccountId")
+                        .IsUnique();
+
+                    b.ToTable("budget_plan_lines", "accounting", t =>
+                        {
+                            t.HasCheckConstraint("CK_budget_plan_lines_amount", "\"BudgetAmount\">=0");
+                        });
+                });
+
             modelBuilder.Entity("Erp.Modules.Accounting.CurrencyRate", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1103,6 +1190,16 @@ namespace Erp.Modules.Accounting.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Erp.Modules.Accounting.BudgetPlanLine", b =>
+                {
+                    b.HasOne("Erp.Modules.Accounting.BudgetPlan", null)
+                        .WithMany("Lines")
+                        .HasForeignKey("TenantId", "CompanyId", "BudgetPlanId")
+                        .HasPrincipalKey("TenantId", "CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Erp.Modules.Accounting.CustomerInvoiceLine", b =>
                 {
                     b.HasOne("Erp.Modules.Accounting.CustomerInvoice", null)
@@ -1153,6 +1250,11 @@ namespace Erp.Modules.Accounting.Persistence.Migrations
                 });
 
             modelBuilder.Entity("Erp.Modules.Accounting.BankReconciliation", b =>
+                {
+                    b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("Erp.Modules.Accounting.BudgetPlan", b =>
                 {
                     b.Navigation("Lines");
                 });
