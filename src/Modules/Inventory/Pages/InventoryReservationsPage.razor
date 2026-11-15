@@ -3,18 +3,18 @@
 @inject HttpClient Http
 
 <PageTitle>Stock reservations</PageTitle>
-<article class="card contacts-card">
+<article class="card contacts-card entity-page module-workspace">
     <p class="eyebrow">Inventory</p><h1>Stock reservations</h1>
-    <p><a href="/inventory/moves">Back to movements</a></p>
+    <nav class="register-tabs" aria-label="Inventory areas"><a href="/inventory/moves">Movements</a><a href="/inventory/balances">Balances</a><a class="is-current" aria-current="page" href="/inventory/reservations">Reservations</a><a href="/inventory/warehouses">Warehouses</a></nav>
     <EditForm Model="_filter" OnValidSubmit="Apply" FormName="reservation-filter">
         <div class="form-grid">
             <label>State <InputSelect @bind-Value="_filter.State"><option value="">All states</option>@foreach (var value in Enum.GetValues<ReservationState>()) { <option value="@value">@value</option> }</InputSelect></label>
-            <label>Location <InputSelect @bind-Value="_filter.LocationId"><option value="">All locations</option>@foreach (var value in _locations) { <option value="@value.Id">@value.Code — @value.Name</option> }</InputSelect></label>
-            <label>Sales order <InputSelect @bind-Value="_filter.ReferenceDocumentId"><option value="">All sales orders</option>@foreach (var order in _salesOrders) { <option value="@order.Id">@order.Number — @order.PartyName</option> }</InputSelect></label>
+            <label>Location <InputSelect @bind-Value="_filter.LocationId"><option value="">All locations</option>@foreach (var value in _locations) { <option value="@value.Id">@value.Code â€” @value.Name</option> }</InputSelect></label>
+            <label>Sales order <InputSelect @bind-Value="_filter.ReferenceDocumentId"><option value="">All sales orders</option>@foreach (var order in _salesOrders) { <option value="@order.Id">@order.Number â€” @order.PartyName</option> }</InputSelect></label>
         </div>
         <button type="submit">Apply filters</button> <button type="button" @onclick="Reset">Reset</button>
     </EditForm>
-    @if (_loading) { <p role="status">Loading reservations…</p> }
+    @if (_loading) { <p role="status">Loading reservationsâ€¦</p> }
     else if (_error is not null) { <p role="alert" class="validation-message">@_error</p> }
     else if (_page is null || _page.Items.Count == 0) { <p>No reservations match the current filters.</p> }
     else
@@ -23,10 +23,10 @@
             <table>
                 <caption>Stock reservations</caption>
                 <thead><tr><th scope="col">Product</th><th scope="col">Location</th><th scope="col">Reserved</th><th scope="col">Consumed</th><th scope="col">Remaining</th><th scope="col">Sales order</th><th scope="col">State</th></tr></thead>
-                <tbody>@foreach (var item in _page.Items) { <tr><td><a href="/inventory/reservations/@item.Id">@item.ProductId</a></td><td>@LocationName(item.LocationId)</td><td>@item.Quantity</td><td>@item.ConsumedQuantity</td><td>@item.RemainingQuantity</td><td>@if (item.ReferenceDocumentId is Guid orderId) { <a href="/sales/orders/@orderId">@SalesOrderName(orderId)</a> } else { <span>—</span> }</td><td>@item.State</td></tr> }</tbody>
+                <tbody>@foreach (var item in _page.Items) { <tr><td><a href="/inventory/reservations/@item.Id">@item.ProductId</a></td><td>@LocationName(item.LocationId)</td><td>@item.Quantity</td><td>@item.ConsumedQuantity</td><td>@item.RemainingQuantity</td><td>@if (item.ReferenceDocumentId is Guid orderId) { <a href="/sales/orders/@orderId">@SalesOrderName(orderId)</a> } else { <span>â€”</span> }</td><td>@item.State</td></tr> }</tbody>
             </table>
         </div>
-        <p>Page @_page.Page · @_page.Total reservation(s)</p><button type="button" disabled="@(_page.Page <= 1)" @onclick="Previous">Previous</button> <button type="button" disabled="@(_page.Page * _page.PageSize >= _page.Total)" @onclick="Next">Next</button>
+        <p>Page @_page.Page Â· @_page.Total reservation(s)</p><button type="button" disabled="@(_page.Page <= 1)" @onclick="Previous">Previous</button> <button type="button" disabled="@(_page.Page * _page.PageSize >= _page.Total)" @onclick="Next">Next</button>
     }
 </article>
 
@@ -35,8 +35,8 @@
     protected override async Task OnInitializedAsync() { _locations.AddRange(await Http.GetFromJsonAsync<List<LocationDto>>("api/v1/inventory/locations") ?? []); _salesOrders.AddRange(await Http.GetFromJsonAsync<List<SourceDocumentLookup>>("api/v1/inventory/source-documents?type=Delivery") ?? []); await Load(); }
     private async Task Load() { _loading = true; _error = null; var values = new List<string> { $"page={_filter.Page}", "pageSize=25" }; if (_filter.State is not null) values.Add($"state={_filter.State}"); if (_filter.LocationId is not null) values.Add($"locationId={_filter.LocationId}"); if (_filter.ReferenceDocumentId is Guid document) values.Add($"referenceDocumentId={document}"); try { _page = await Http.GetFromJsonAsync<ReservationPage>("api/v1/inventory/reservations?" + string.Join("&", values)); } catch (HttpRequestException ex) { _error = ex.Message; } _loading = false; }
     private Task Apply() { _filter.Page = 1; return Load(); } private async Task Reset() { _filter = new(); await Load(); } private async Task Previous() { _filter.Page--; await Load(); } private async Task Next() { _filter.Page++; await Load(); }
-    private string LocationName(Guid id) => _locations.FirstOrDefault(x => x.Id == id) is { } location ? $"{location.Code} — {location.Name}" : id.ToString();
-    private string SalesOrderName(Guid id) => _salesOrders.FirstOrDefault(x => x.Id == id) is { } order ? $"{order.Number} — {order.PartyName}" : $"Order {id.ToString()[..8]}";
+    private string LocationName(Guid id) => _locations.FirstOrDefault(x => x.Id == id) is { } location ? $"{location.Code} â€” {location.Name}" : id.ToString();
+    private string SalesOrderName(Guid id) => _salesOrders.FirstOrDefault(x => x.Id == id) is { } order ? $"{order.Number} â€” {order.PartyName}" : $"Order {id.ToString()[..8]}";
     private sealed class ReservationFilter { public ReservationState? State { get; set; } public Guid? LocationId { get; set; } public Guid? ReferenceDocumentId { get; set; } public int Page { get; set; } = 1; }
     private sealed record SourceDocumentLookup(Guid Id, string Number, string PartyName, IReadOnlyList<Guid> ProductIds);
 }

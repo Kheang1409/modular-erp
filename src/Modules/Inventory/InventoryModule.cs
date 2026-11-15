@@ -21,7 +21,7 @@ public sealed class InventoryModule : IErpModule
         s.AddDbContext<InventoryDbContext>((provider, options) => options.UseNpgsql(
             provider.GetRequiredService<IRelationalDatabaseSession>().Connection,
             postgres => postgres.MigrationsHistoryTable("__EFMigrationsHistory", "inventory")));
-        s.AddScoped<IInventoryService, InventoryService>(); s.AddScoped<IStockAvailability, StockAvailability>();
+        s.AddScoped<InventoryService>(); s.AddScoped<IInventoryService>(provider => provider.GetRequiredService<InventoryService>()); s.AddScoped<IProductionStockWriter>(provider => provider.GetRequiredService<InventoryService>()); s.AddScoped<IStockAvailability, StockAvailability>();
         s.AddScoped<IInventoryReportingData, InventoryReportingData>(); s.AddScoped<IModuleDatabaseInitializer, InventoryDatabaseInitializer>();
         s.AddScoped<InventoryFulfillmentStatusConsumer>();
         s.AddScoped<IIntegrationEventConsumer<PurchaseOrderFulfillmentProgressEvent>>(provider =>

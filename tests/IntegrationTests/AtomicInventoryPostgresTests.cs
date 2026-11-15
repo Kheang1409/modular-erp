@@ -16,6 +16,9 @@ using Erp.Infrastructure.Sequences;
 using Erp.ModuleSystem;
 using Erp.Modules.Contacts;
 using Erp.Modules.Inventory;
+using Erp.Modules.Inventory.Contracts;
+using Erp.Modules.Manufacturing;
+using Erp.Modules.Manufacturing.Contracts;
 using Erp.Modules.Products;
 using Erp.Modules.Purchasing;
 using Erp.Modules.Purchasing.Contracts;
@@ -38,6 +41,36 @@ public sealed class AtomicInventoryPostgresTests(
     ITestOutputHelper output)
     : IClassFixture<AtomicInventoryPostgresFixture>
 {
+    [Fact]
+    public async Task ManufacturingReservationsAreScopedIdempotentAndReleasable()
+    {
+        await using var scope = await TestScope.CreateAsync(fixture.ConnectionString);
+        var production = scope.ServiceProvider.GetRequiredService<IProductionStockWriter>();
+        var workOrderId = Guid.NewGuid();
+        var requirement = new ProductionMaterialIssue(scope.ProductA.Id, 2m);
+
+        await production.ReserveProductionMaterialsAsync(workOrderId, scope.InternalA.Id, [requirement],
+            CancellationToken.None);
+        var first = await scope.Database.Reservations.AsNoTracking()
+            .SingleAsync(x => x.ReferenceDocumentType == "ManufacturingWorkOrder" &&
+                x.ReferenceDocumentId == workOrderId);
+        Assert.Equal(2m, first.Quantity);
+        Assert.Equal(ReservationState.Active, first.State);
+        Assert.Equal(6m, (await scope.Inventory.BalanceAsync(scope.ProductA.Id, scope.InternalA.Id,
+            CancellationToken.None)).Reserved);
+
+        await production.ReserveProductionMaterialsAsync(workOrderId, scope.InternalA.Id, [requirement],
+            CancellationToken.None);
+        Assert.Equal(1, await scope.Database.Reservations.AsNoTracking().CountAsync(x =>
+            x.ReferenceDocumentType == "ManufacturingWorkOrder" && x.ReferenceDocumentId == workOrderId));
+
+        await production.ReleaseProductionMaterialsAsync(workOrderId, CancellationToken.None);
+        Assert.Equal(ReservationState.Released, (await scope.Database.Reservations.AsNoTracking()
+            .SingleAsync(x => x.Id == first.Id)).State);
+        Assert.Equal(4m, (await scope.Inventory.BalanceAsync(scope.ProductA.Id, scope.InternalA.Id,
+            CancellationToken.None)).Reserved);
+    }
+
     [Fact]
     public async Task PurchaseOrderProgressUsesAllProductLinesAndAllowsFurtherPartialReceipts()
     {
@@ -76,6 +109,90 @@ public sealed class AtomicInventoryPostgresTests(
         Assert.Equal(PurchaseOrderState.Received,
             await finalReader.PurchaseOrders.Where(item => item.Id == scope.PurchaseOrderId)
                 .Select(item => item.State).SingleAsync());
+    }
+
+    [Fact]
+    public async Task PurchaseReceiptsFundProductionReservationsConsumptionAndFinishedGoods()
+    {
+        await using var scope = await TestScope.CreateAsync(fixture.ConnectionString);
+        var token = CancellationToken.None;
+        var eventContext = EventContext(scope);
+        var fulfillment = scope.ServiceProvider
+            .GetRequiredService<IIntegrationEventConsumer<PurchaseOrderFulfillmentProgressEvent>>();
+
+        var firstReceipt = await scope.Inventory.CreateAsync(new StockMoveRequest(
+            StockMoveType.Receipt, scope.ProductA.Id, 50, scope.Supplier.Id, scope.InternalA.Id,
+            BusinessDate, "PurchaseOrder", scope.PurchaseOrderId), token);
+        await scope.Inventory.CompleteAsync(firstReceipt.Id,
+            new(firstReceipt.ConcurrencyStamp, "supply-chain-receipt-a"), token);
+        await fulfillment.HandleAsync(scope.Outbox.Attempts.OfType<PurchaseOrderFulfillmentProgressEvent>().Last(),
+            eventContext, token);
+        Assert.Equal(PurchaseOrderState.PartiallyReceived,
+            await scope.Purchasing.PurchaseOrders.Where(order => order.Id == scope.PurchaseOrderId)
+                .Select(order => order.State).SingleAsync());
+        Assert.Equal(61m, (await scope.Inventory.BalanceAsync(scope.ProductA.Id, scope.InternalA.Id, token)).OnHand);
+
+        var secondReceipt = await scope.Inventory.CreateAsync(new StockMoveRequest(
+            StockMoveType.Receipt, scope.ProductB.Id, 3, scope.Supplier.Id, scope.InternalA.Id,
+            BusinessDate, "PurchaseOrder", scope.PurchaseOrderId), token);
+        await scope.Inventory.CompleteAsync(secondReceipt.Id,
+            new(secondReceipt.ConcurrencyStamp, "supply-chain-receipt-b"), token);
+        await fulfillment.HandleAsync(scope.Outbox.Attempts.OfType<PurchaseOrderFulfillmentProgressEvent>().Last(),
+            eventContext, token);
+        Assert.Equal(PurchaseOrderState.Received,
+            await scope.Purchasing.PurchaseOrders.Where(order => order.Id == scope.PurchaseOrderId)
+                .Select(order => order.State).SingleAsync());
+        Assert.Equal(3m, (await scope.Inventory.BalanceAsync(scope.ProductB.Id, scope.InternalA.Id, token)).OnHand);
+
+        var manufacturing = scope.ServiceProvider.GetRequiredService<IManufacturingService>();
+        var bill = await manufacturing.CreateBillOfMaterialAsync(new BillOfMaterialRequest(
+            "BOM-SUPPLY-1", scope.ProductB.Id, "A", 1,
+            [new(scope.ProductA.Id, 2, "EA", "Component per finished unit", 5m)], null), token);
+        var activeBill = await manufacturing.SetBillOfMaterialStateAsync(
+            bill.Id, BillOfMaterialState.Active, bill.ConcurrencyStamp, token);
+        var productionDate = BusinessDate.AddDays(1);
+        var workOrder = await manufacturing.CreateWorkOrderAsync(new CreateWorkOrderRequest(
+            "WO-SUPPLY-1", activeBill.Id, 2, productionDate, productionDate, null,
+            scope.InternalA.Id, 4, "USD"), token);
+        var released = await manufacturing.TransitionWorkOrderAsync(workOrder.Id,
+            new(WorkOrderState.Released, null, workOrder.ConcurrencyStamp), token);
+        var materialCheck = Assert.Single(await manufacturing.GetWorkOrderMaterialAvailabilityAsync(workOrder.Id, token));
+        Assert.Equal(4m, materialCheck.RequiredQuantity);
+        Assert.Equal(4m, materialCheck.ReservedForWorkOrder);
+        Assert.Equal(53m, materialCheck.Available);
+        Assert.Equal(0m, materialCheck.Shortage);
+
+        var reservation = await scope.Database.Reservations.AsNoTracking().SingleAsync(item =>
+            item.ReferenceDocumentType == "ManufacturingWorkOrder" && item.ReferenceDocumentId == workOrder.Id);
+        Assert.Equal(4m, reservation.Quantity);
+        Assert.Equal(53m, (await scope.Inventory.BalanceAsync(scope.ProductA.Id, scope.InternalA.Id, token)).Available);
+
+        var inProgress = await manufacturing.TransitionWorkOrderAsync(workOrder.Id,
+            new(WorkOrderState.InProgress, "Production started", released.ConcurrencyStamp), token);
+        var completed = await manufacturing.TransitionWorkOrderAsync(workOrder.Id,
+            new(WorkOrderState.Completed, "Production finished", inProgress.ConcurrencyStamp,
+                ActualOutputQuantity: 2), token);
+        Assert.Equal(WorkOrderState.Completed, completed.State);
+
+        var componentBalance = await scope.Inventory.BalanceAsync(scope.ProductA.Id, scope.InternalA.Id, token);
+        Assert.Equal(57m, componentBalance.OnHand);
+        Assert.Equal(4m, componentBalance.Reserved);
+        Assert.Equal(5m, (await scope.Inventory.BalanceAsync(scope.ProductB.Id, scope.InternalA.Id, token)).OnHand);
+        Assert.Equal(ReservationState.Released, (await scope.Database.Reservations.AsNoTracking()
+            .SingleAsync(item => item.Id == reservation.Id)).State);
+        Assert.Equal(ReservationState.Active, (await scope.Database.Reservations.AsNoTracking()
+            .SingleAsync(item => item.ReferenceDocumentType == "SalesOrder" && item.ReferenceDocumentId == scope.SalesOrderId &&
+                item.ProductId == scope.ProductA.Id)).State);
+
+        var productionMovements = await scope.Database.StockMoves.AsNoTracking()
+            .Where(move => move.ReferenceDocumentType == "ManufacturingWorkOrder" &&
+                move.ReferenceDocumentId == workOrder.Id && move.State == StockMoveState.Completed)
+            .ToListAsync();
+        Assert.Equal(2, productionMovements.Count);
+        Assert.Contains(productionMovements, move => move.ProductId == scope.ProductA.Id &&
+            move.SourceLocationId == scope.InternalA.Id && move.DestinationLocationId == scope.Loss.Id && move.Quantity == 4m);
+        Assert.Contains(productionMovements, move => move.ProductId == scope.ProductB.Id &&
+            move.SourceLocationId == scope.Gain.Id && move.DestinationLocationId == scope.InternalA.Id && move.Quantity == 2m);
     }
 
     [Fact]
@@ -1693,6 +1810,7 @@ public sealed class AtomicInventoryPostgresTests(
             new SalesModule().ConfigureServices(registrations, configuration);
             new PurchasingModule().ConfigureServices(registrations, configuration);
             new InventoryModule().ConfigureServices(registrations, configuration);
+            new ManufacturingModule().ConfigureServices(registrations, configuration);
             if (fulfillmentSaveGate is not null)
             {
                 registrations.AddSingleton(fulfillmentSaveGate);
@@ -1863,6 +1981,8 @@ public sealed class AtomicInventoryPostgresFixture : IAsyncLifetime
         await purchasing.Database.MigrateAsync();
         await using var inventory = new InventoryDbContext(new DbContextOptionsBuilder<InventoryDbContext>().UseNpgsql(ConnectionString, options => options.MigrationsHistoryTable("__EFMigrationsHistory", "inventory")).Options);
         await inventory.Database.MigrateAsync();
+        await using var manufacturing = new ManufacturingDbContext(new DbContextOptionsBuilder<ManufacturingDbContext>().UseNpgsql(ConnectionString, options => options.MigrationsHistoryTable("__EFMigrationsHistory", "manufacturing")).Options);
+        await manufacturing.Database.MigrateAsync();
     }
     public async Task DisposeAsync() { if (_postgres is not null) await _postgres.DisposeAsync(); }
 }

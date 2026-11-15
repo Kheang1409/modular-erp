@@ -6,6 +6,7 @@ using Erp.Abstractions.Events;
 using Erp.Abstractions.Persistence;
 using Erp.Abstractions.Sequences;
 using Erp.Modules.Products.Contracts;
+using Erp.Modules.Inventory.Contracts;
 using Erp.Modules.Purchasing.Contracts;
 using Erp.Modules.Sales.Contracts;
 using Microsoft.AspNetCore.Http;
@@ -23,8 +24,126 @@ public interface IInventoryService
 public sealed class InventoryService(InventoryDbContext db, ITenantContext tenant, ICompanyContext company,
     IProductDirectory products, ISalesOrderDirectory sales, IPurchaseOrderDirectory purchasing, ISequenceService sequences,
     IClock clock, IAuditLogWriter audit, IOutboxWriter outbox, IHttpContextAccessor http,
-    IBusinessTransactionCoordinator transactions) : IInventoryService
+    IBusinessTransactionCoordinator transactions) : IInventoryService, IProductionStockWriter
 {
+    public async Task ReserveProductionMaterialsAsync(Guid workOrderId, Guid locationId,
+        IReadOnlyList<ProductionMaterialIssue> materialRequirements, CancellationToken cancellationToken)
+    {
+        if (workOrderId == Guid.Empty || locationId == Guid.Empty ||
+            materialRequirements.Any(x => x.ProductId == Guid.Empty || x.Quantity <= 0) ||
+            materialRequirements.Select(x => x.ProductId).Distinct().Count() != materialRequirements.Count)
+            throw new ProductionStockConflictException("Production reservations require a work order, location, and unique positive material quantities.");
+        try
+        {
+            await using var transaction = await transactions.BeginAsync(db, cancellationToken);
+            await InternalLocation(locationId, cancellationToken);
+            foreach (var requirement in materialRequirements)
+                await ReserveForProductionAsync(workOrderId, requirement, locationId, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch (InventoryValidationException exception)
+        {
+            throw new ProductionStockConflictException(string.Join(" ", exception.Errors.Values.SelectMany(messages => messages)));
+        }
+        catch (InventoryConcurrencyException exception)
+        {
+            throw new ProductionStockConflictException(exception.Message);
+        }
+    }
+
+    public async Task ReleaseProductionMaterialsAsync(Guid workOrderId, CancellationToken cancellationToken)
+    {
+        if (workOrderId == Guid.Empty) throw new ProductionStockConflictException("A work order is required to release production reservations.");
+        await using var transaction = await transactions.BeginAsync(db, cancellationToken);
+        var reservations = await db.Reservations.Where(x => x.ReferenceDocumentType == "ManufacturingWorkOrder" &&
+            x.ReferenceDocumentId == workOrderId && x.State == ReservationState.Active).ToListAsync(cancellationToken);
+        foreach (var reservation in reservations)
+            await ReleaseAsync(reservation.Id, new ReservationActionRequest(reservation.ConcurrencyStamp,
+                $"mfg-{workOrderId:N}-release-{reservation.ProductId:N}"), cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task CompleteProductionAsync(Guid workOrderId, Guid locationId, DateOnly businessDate,
+        IReadOnlyList<ProductionMaterialIssue> materialIssues, Guid outputProductId, decimal outputQuantity,
+        CancellationToken cancellationToken)
+    {
+        if (workOrderId == Guid.Empty || outputProductId == Guid.Empty || outputQuantity <= 0 || businessDate == default)
+            throw Error("production", "A work order, output product, positive output quantity, and business date are required.");
+        if (materialIssues.Any(issue => issue.ProductId == Guid.Empty || issue.Quantity <= 0) ||
+            materialIssues.Select(issue => issue.ProductId).Distinct().Count() != materialIssues.Count)
+            throw Error("materials", "Production material issues must have unique products and positive quantities.");
+
+        try
+        {
+            await using var transaction = await transactions.BeginAsync(db, cancellationToken);
+            await InternalLocation(locationId, cancellationToken);
+            await ReleaseProductionMaterialsAsync(workOrderId, cancellationToken);
+            var lossLocation = await EnsureProductionAdjustmentLocationAsync(
+                LocationType.InventoryLoss, "MFG-ISSUE", "Manufacturing component issue", cancellationToken);
+            var gainLocation = await EnsureProductionAdjustmentLocationAsync(
+                LocationType.InventoryGain, "MFG-OUTPUT", "Manufacturing finished output", cancellationToken);
+
+            if (materialIssues.Count > 0)
+            {
+                var issueMoves = await CreateBatchAsync(new StockMoveBatchRequest(
+                    StockMoveType.Adjustment, locationId, lossLocation, businessDate,
+                    materialIssues.Select(x => new StockMoveBatchLineRequest(x.ProductId, x.Quantity)).ToArray(),
+                    "ManufacturingWorkOrder", workOrderId, $"Material issue for work order {workOrderId:N}"), cancellationToken);
+                foreach (var move in issueMoves.Items)
+                    await CompleteAsync(move.Id, new(move.ConcurrencyStamp,
+                        $"mfg-{workOrderId:N}-issue-{move.ProductId:N}"), cancellationToken);
+            }
+
+            var outputMoves = await CreateBatchAsync(new StockMoveBatchRequest(
+                StockMoveType.Adjustment, gainLocation, locationId, businessDate,
+                [new StockMoveBatchLineRequest(outputProductId, outputQuantity)],
+                "ManufacturingWorkOrder", workOrderId, $"Finished output for work order {workOrderId:N}"), cancellationToken);
+            var outputMove = outputMoves.Items[0];
+            await CompleteAsync(outputMove.Id, new(outputMove.ConcurrencyStamp,
+                $"mfg-{workOrderId:N}-output"), cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch (InventoryValidationException exception)
+        {
+            throw new ProductionStockConflictException(string.Join(" ", exception.Errors.Values.SelectMany(messages => messages)));
+        }
+        catch (InventoryConcurrencyException exception)
+        {
+            throw new ProductionStockConflictException(exception.Message);
+        }
+    }
+
+    private async Task<Guid> EnsureProductionAdjustmentLocationAsync(
+        LocationType type, string codePrefix, string name, CancellationToken cancellationToken)
+    {
+        var location = await db.Locations.AsNoTracking().Where(x => x.Type == type && x.IsActive)
+            .OrderBy(x => x.Code).FirstOrDefaultAsync(cancellationToken);
+        if (location is not null) return location.Id;
+
+        var suffix = 0;
+        string code;
+        do
+        {
+            code = suffix == 0 ? codePrefix : $"{codePrefix}-{suffix}";
+            suffix++;
+        } while (await db.Locations.AnyAsync(x => x.Code == code, cancellationToken));
+        var created = new StockLocation
+        {
+            Id = Guid.NewGuid(),
+            TenantId = Tenant(),
+            CompanyId = Company(),
+            Code = code,
+            Name = name,
+            Type = type,
+            IsActive = true,
+            ConcurrencyStamp = Stamp()
+        };
+        db.Locations.Add(created);
+        await Save(cancellationToken);
+        await Audit("inventory.location.system-created", created.Id, LocationDtoOf(created), cancellationToken);
+        return created.Id;
+    }
+
     public async Task<IReadOnlyList<WarehouseDto>> WarehousesAsync(CancellationToken t) => (await db.Warehouses.AsNoTracking().OrderBy(x => x.Code).ToListAsync(t)).Select(WarehouseDtoOf).ToList();
     public async Task<WarehouseDto> SaveWarehouseAsync(Guid? id, WarehouseRequest r, CancellationToken t)
     {
@@ -185,6 +304,57 @@ public sealed class InventoryService(InventoryDbContext db, ITenantContext tenan
         await transaction.CommitAsync(t);
         return result;
     }
+    private async Task<ReservationDto> ReserveForProductionAsync(Guid workOrderId,
+        ProductionMaterialIssue requirement, Guid locationId, CancellationToken cancellationToken)
+    {
+        var key = $"mfg-{workOrderId:N}-reserve-{requirement.ProductId:N}";
+        await using var transaction = await transactions.BeginAsync(db, cancellationToken);
+        await Product(requirement.ProductId, cancellationToken);
+        await InternalLocation(locationId, cancellationToken);
+        await LockReservationKey(key, cancellationToken);
+
+        if (await db.Reservations.AsNoTracking().SingleOrDefaultAsync(x => x.IdempotencyKey == key,
+                cancellationToken) is { } prior)
+        {
+            if (prior.ProductId != requirement.ProductId || prior.LocationId != locationId ||
+                prior.Quantity != requirement.Quantity || prior.ReferenceDocumentType != "ManufacturingWorkOrder" ||
+                prior.ReferenceDocumentId != workOrderId)
+                throw Error("idempotencyKey", "The production reservation key has already been used for a different request.");
+            var replay = ReservationDtoOf(prior);
+            await transaction.CommitAsync(cancellationToken);
+            return replay;
+        }
+
+        await Lock(requirement.ProductId, locationId, cancellationToken);
+        var balance = await BalanceAsync(requirement.ProductId, locationId, cancellationToken);
+        if (balance.Available < requirement.Quantity)
+            throw Error("quantity", "Production reservation exceeds available stock.");
+
+        var reservation = new StockReservation
+        {
+            Id = Guid.NewGuid(),
+            TenantId = Tenant(),
+            CompanyId = Company(),
+            ProductId = requirement.ProductId,
+            LocationId = locationId,
+            Quantity = requirement.Quantity,
+            State = ReservationState.Active,
+            IdempotencyKey = key,
+            ReferenceDocumentType = "ManufacturingWorkOrder",
+            ReferenceDocumentId = workOrderId,
+            CreatedAtUtc = clock.UtcNow,
+            ConcurrencyStamp = Stamp()
+        };
+        db.Reservations.Add(reservation);
+        await Save(cancellationToken);
+        outbox.Add(new StockReservedEvent(Guid.NewGuid(), clock.UtcNow, reservation.Id,
+            reservation.ProductId, reservation.LocationId, reservation.Quantity));
+        await Audit("inventory.stock.reserved", reservation.Id, ReservationDtoOf(reservation), cancellationToken);
+        var result = ReservationDtoOf(reservation);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
+    }
+
     public async Task<ReservationDto> ReleaseAsync(Guid id, ReservationActionRequest r, CancellationToken t)
     {
         ValidateKey(r.IdempotencyKey);

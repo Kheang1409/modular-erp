@@ -3,8 +3,8 @@
 @inject HttpClient Http
 
 <PageTitle>Stock reservation</PageTitle>
-<article class="card contacts-card">
-    @if (_loading) { <p role="status">Loading reservation…</p> }
+<article class="card contacts-card entity-page module-workspace">
+    @if (_loading) { <p role="status">Loading reservationâ€¦</p> }
     else if (_reservation is null) { <p role="alert">Reservation was not found.</p> }
     else
     {
@@ -18,6 +18,6 @@
 @code {
     [Parameter] public Guid Id { get; set; }
     private ReservationDto? _reservation; private string _location = ""; private readonly string _releaseKey = Guid.NewGuid().ToString("N"); private bool _loading = true; private bool _busy; private string? _message; private string? _error;
-    protected override async Task OnParametersSetAsync() { _loading = true; try { _reservation = await Http.GetFromJsonAsync<ReservationDto>($"api/v1/inventory/reservations/{Id}"); } catch (HttpRequestException) { _reservation = null; } if (_reservation is not null) { var locations = await Http.GetFromJsonAsync<List<LocationDto>>("api/v1/inventory/locations") ?? []; _location = locations.FirstOrDefault(x => x.Id == _reservation.LocationId) is { } value ? $"{value.Code} — {value.Name}" : _reservation.LocationId.ToString(); } _loading = false; }
+    protected override async Task OnParametersSetAsync() { _loading = true; try { _reservation = await Http.GetFromJsonAsync<ReservationDto>($"api/v1/inventory/reservations/{Id}"); } catch (HttpRequestException) { _reservation = null; } if (_reservation is not null) { var locations = await Http.GetFromJsonAsync<List<LocationDto>>("api/v1/inventory/locations") ?? []; _location = locations.FirstOrDefault(x => x.Id == _reservation.LocationId) is { } value ? $"{value.Code} â€” {value.Name}" : _reservation.LocationId.ToString(); } _loading = false; }
     private async Task Release() { _busy = true; _message = null; _error = null; var response = await Http.PostAsJsonAsync($"api/v1/inventory/reservations/{Id}/release", new ReservationActionRequest(_reservation!.ConcurrencyStamp, _releaseKey)); if (response.IsSuccessStatusCode) { _reservation = await response.Content.ReadFromJsonAsync<ReservationDto>(); _message = "Reservation released."; } else _error = await response.Content.ReadAsStringAsync(); _busy = false; }
 }

@@ -4,10 +4,10 @@
 @inject NavigationManager Nav
 
 <PageTitle>New inventory movement</PageTitle>
-<article class="card contacts-card">
+<article class="card contacts-card entity-page module-workspace">
     <p class="eyebrow">Inventory</p><h1>New inventory movement</h1>
     <p>Need several products on the same route? <a href="/inventory/moves/batch/new">Create a movement batch</a>.</p>
-    @if (_loading) { <p role="status">Loading products and locations…</p> }
+    @if (_loading) { <p role="status">Loading products and locationsâ€¦</p> }
     else if (_products.Count == 0 || !_locations.Any(x => x.Type == LocationType.Internal)) { <p role="alert">Create an active inventory product and internal location before recording a movement.</p> }
     else
     {
@@ -19,15 +19,15 @@
                 {
                     <label>Search source documents <InputText @bind-Value="_sourceDocumentFilter" /></label>
                     <div class="field-action"><button type="button" @onclick="LoadSourceDocuments">Search</button></div>
-                    <label>Source document <InputSelect @bind-Value="_model.ReferenceDocumentId"><option value="">Unlinked movement</option>@foreach (var document in _sourceDocuments) { <option value="@document.Id">@document.Number — @document.PartyName</option> }</InputSelect></label>
+                    <label>Source document <InputSelect @bind-Value="_model.ReferenceDocumentId"><option value="">Unlinked movement</option>@foreach (var document in _sourceDocuments) { <option value="@document.Id">@document.Number â€” @document.PartyName</option> }</InputSelect></label>
                 }
                 <label>Search products <input @bind="_productFilter" @bind:event="oninput" /></label>
-                <label>Product <InputSelect @bind-Value="_model.ProductId"><option value="@Guid.Empty">Select a product</option>@foreach (var product in FilteredProducts) { <option @key="product.Id" value="@product.Id">@product.Sku — @product.Name</option> }</InputSelect></label>
+                <label>Product <InputSelect @bind-Value="_model.ProductId"><option value="@Guid.Empty">Select a product</option>@foreach (var product in FilteredProducts) { <option @key="product.Id" value="@product.Id">@product.Sku â€” @product.Name</option> }</InputSelect></label>
                 <label>Quantity <InputNumber @bind-Value="_model.Quantity" /></label>
                 <label>Business date <InputDate @bind-Value="_model.BusinessDate" /></label>
                 <label>Filter locations <input @bind="_locationFilter" @bind:event="oninput" /></label>
-                <label>Source location <InputSelect @bind-Value="_model.SourceLocationId"><option value="">Select a source</option>@foreach (var location in SourceLocations) { <option @key="location.Id" value="@location.Id">@location.Code — @location.Name (@location.Type)</option> }</InputSelect></label>
-                <label>Destination location <InputSelect @bind-Value="_model.DestinationLocationId"><option value="">Select a destination</option>@foreach (var location in DestinationLocations) { <option @key="location.Id" value="@location.Id">@location.Code — @location.Name (@location.Type)</option> }</InputSelect></label>
+                <label>Source location <InputSelect @bind-Value="_model.SourceLocationId"><option value="">Select a source</option>@foreach (var location in SourceLocations) { <option @key="location.Id" value="@location.Id">@location.Code â€” @location.Name (@location.Type)</option> }</InputSelect></label>
+                <label>Destination location <InputSelect @bind-Value="_model.DestinationLocationId"><option value="">Select a destination</option>@foreach (var location in DestinationLocations) { <option @key="location.Id" value="@location.Id">@location.Code â€” @location.Name (@location.Type)</option> }</InputSelect></label>
                 <label class="wide">Notes <InputTextArea @bind-Value="_model.Notes" /></label>
             </div>
             <button type="submit" disabled="@_saving">Create draft</button>

@@ -3,11 +3,11 @@
 @inject HttpClient Http
 
 <PageTitle>Warehouses and locations</PageTitle>
-<article class="card contacts-card">
+<article class="card contacts-card entity-page module-workspace">
     <p class="eyebrow">Inventory configuration</p>
     <h1>Warehouses and locations</h1>
     <p>Locations with active reservations or draft movements cannot be deactivated.</p>
-    @if (_loading) { <p role="status">Loading inventory configuration…</p> }
+    @if (_loading) { <p role="status">Loading inventory configurationâ€¦</p> }
     else
     {
         <AuthorizeView Policy="@InventoryPermissions.Configure" Context="configurationAuthorization">
@@ -30,7 +30,7 @@
                             <label>Code <InputText @bind-Value="_location.Code" /></label>
                             <label>Name <InputText @bind-Value="_location.Name" /></label>
                             <label>Type <InputSelect @bind-Value="_location.Type">@foreach (var type in Enum.GetValues<LocationType>()) { <option value="@type">@type</option> }</InputSelect></label>
-                            <label>Warehouse <InputSelect @bind-Value="_location.WarehouseId"><option value="">None</option>@foreach (var warehouse in _warehouses.Where(x => x.IsActive || x.Id == _location.WarehouseId)) { <option value="@warehouse.Id">@warehouse.Code — @warehouse.Name</option> }</InputSelect></label>
+                            <label>Warehouse <InputSelect @bind-Value="_location.WarehouseId"><option value="">None</option>@foreach (var warehouse in _warehouses.Where(x => x.IsActive || x.Id == _location.WarehouseId)) { <option value="@warehouse.Id">@warehouse.Code â€” @warehouse.Name</option> }</InputSelect></label>
                             <label><InputCheckbox @bind-Value="_location.IsActive" /> Active</label>
                             <p><button type="submit" disabled="@_saving">Save location</button> @if (_location.Id is not null) { <button type="button" @onclick="ResetLocation">Cancel edit</button> }</p>
                         </EditForm>
@@ -82,7 +82,7 @@
     private void EditWarehouse(WarehouseDto value) { ClearFeedback(); _warehouse = new() { Id = value.Id, Code = value.Code, Name = value.Name, IsActive = value.IsActive, ConcurrencyStamp = value.ConcurrencyStamp }; }
     private void EditLocation(LocationDto value) { ClearFeedback(); _location = new() { Id = value.Id, WarehouseId = value.WarehouseId, Code = value.Code, Name = value.Name, Type = value.Type, IsActive = value.IsActive, ConcurrencyStamp = value.ConcurrencyStamp }; }
     private void ResetWarehouse() => _warehouse = new(); private void ResetLocation() => _location = new(); private void ClearFeedback() { _message = null; _error = null; }
-    private string WarehouseName(Guid? id) => id is Guid value && _warehouses.FirstOrDefault(x => x.Id == value) is { } warehouse ? $"{warehouse.Code} — {warehouse.Name}" : "—";
+    private string WarehouseName(Guid? id) => id is Guid value && _warehouses.FirstOrDefault(x => x.Id == value) is { } warehouse ? $"{warehouse.Code} â€” {warehouse.Name}" : "â€”";
     private static string Status(bool active) => active ? "Active" : "Inactive";
     private static async Task<string> ApiError(HttpResponseMessage response) { var text = await response.Content.ReadAsStringAsync(); return response.StatusCode == System.Net.HttpStatusCode.Conflict ? "The record changed or cannot be deactivated. Refresh and try again. " + text : text; }
     private sealed class WarehouseForm { public Guid? Id { get; set; } [System.ComponentModel.DataAnnotations.Required, System.ComponentModel.DataAnnotations.StringLength(50)] public string Code { get; set; } = ""; [System.ComponentModel.DataAnnotations.Required, System.ComponentModel.DataAnnotations.StringLength(200)] public string Name { get; set; } = ""; public bool IsActive { get; set; } = true; public string? ConcurrencyStamp { get; set; } }

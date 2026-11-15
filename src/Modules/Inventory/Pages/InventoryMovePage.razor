@@ -4,13 +4,13 @@
 @inject NavigationManager Nav
 
 <PageTitle>Inventory movement</PageTitle>
-<article class="card contacts-card">
-    @if (_loading) { <p role="status">Loading movement…</p> }
+<article class="card contacts-card entity-page module-workspace">
+    @if (_loading) { <p role="status">Loading movementâ€¦</p> }
     else if (_move is null) { <p role="alert">Movement was not found.</p> }
     else
     {
         <p class="eyebrow">Inventory movement</p><h1>@_move.Number</h1>
-        <dl><dt>State</dt><dd>@_move.State</dd><dt>Type</dt><dd>@_move.Type</dd><dt>Product</dt><dd>@_move.ProductSku</dd><dt>Quantity</dt><dd>@_move.Quantity @_move.UnitCode</dd><dt>Source</dt><dd>@LocationName(_move.SourceLocationId)</dd><dt>Destination</dt><dd>@LocationName(_move.DestinationLocationId)</dd><dt>Business date</dt><dd>@_move.BusinessDate</dd><dt>Source document</dt><dd>@(_move.ReferenceDocumentType ?? "—") @(_move.ReferenceDocumentId?.ToString() ?? "")</dd><dt>Notes</dt><dd>@(_move.Notes ?? "—")</dd></dl>
+        <dl><dt>State</dt><dd>@_move.State</dd><dt>Type</dt><dd>@_move.Type</dd><dt>Product</dt><dd>@_move.ProductSku</dd><dt>Quantity</dt><dd>@_move.Quantity @_move.UnitCode</dd><dt>Source</dt><dd>@LocationName(_move.SourceLocationId)</dd><dt>Destination</dt><dd>@LocationName(_move.DestinationLocationId)</dd><dt>Business date</dt><dd>@_move.BusinessDate</dd><dt>Source document</dt><dd>@(_move.ReferenceDocumentType ?? "â€”") @(_move.ReferenceDocumentId?.ToString() ?? "")</dd><dt>Notes</dt><dd>@(_move.Notes ?? "â€”")</dd></dl>
         @if (_move.State == StockMoveState.Draft)
         {
             <AuthorizeView Policy="@InventoryPermissions.Complete"><button type="button" disabled="@_busy" @onclick="Complete">Complete</button></AuthorizeView>
@@ -30,5 +30,5 @@
     private async Task Cancel() => await Act(() => Http.PostAsJsonAsync($"api/v1/inventory/moves/{Id}/cancel", new MoveActionRequest(_move!.ConcurrencyStamp)), "Movement cancelled.");
     private async Task Correct() { _busy = true; Clear(); var response = await Http.PostAsync($"api/v1/inventory/moves/{Id}/correct", null); if (response.IsSuccessStatusCode) { var correction = await response.Content.ReadFromJsonAsync<StockMoveDto>(); Nav.NavigateTo($"/inventory/moves/{correction!.Id}"); } else { _error = await response.Content.ReadAsStringAsync(); _busy = false; } }
     private async Task Act(Func<Task<HttpResponseMessage>> send, string success) { _busy = true; Clear(); var response = await send(); if (response.IsSuccessStatusCode) { _move = await response.Content.ReadFromJsonAsync<StockMoveDto>(); _message = success; } else _error = await response.Content.ReadAsStringAsync(); _busy = false; }
-    private void Clear() { _message = null; _error = null; } private string LocationName(Guid? id) => id is Guid value && _locations.FirstOrDefault(x => x.Id == value) is { } location ? $"{location.Code} — {location.Name}" : "External";
+    private void Clear() { _message = null; _error = null; } private string LocationName(Guid? id) => id is Guid value && _locations.FirstOrDefault(x => x.Id == value) is { } location ? $"{location.Code} â€” {location.Name}" : "External";
 }
