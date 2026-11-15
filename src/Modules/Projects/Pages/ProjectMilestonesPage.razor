@@ -1,0 +1,22 @@
+@page "/projects/milestones"
+@attribute [Authorize(Policy = ProjectsPermissions.Read)]
+@inject IProjectsService Projects
+@inject IAuthorizationService Authorization
+@inject AuthenticationStateProvider AuthenticationStateProvider
+<PageTitle>Project milestones</PageTitle>
+<article class="card entity-page module-workspace"><div class="page-heading"><div><p class="eyebrow">Work management</p><h1>Milestones</h1><p class="muted">Plan and track key delivery dates for each project.</p></div></div>
+@if (_error is not null) { <p role="alert">@_error</p> }
+<section class="module-panel"><h2>Project</h2><InputSelect @bind-Value="_projectId" @bind-Value:after="LoadAsync"><option value="@Guid.Empty">Choose a project</option>@foreach (var p in _projects) { <option value="@p.Id">@p.Name</option> }</InputSelect></section>
+@if (_projectId != Guid.Empty) { @if (_canManage) { <section class="module-panel"><h2>New milestone</h2><EditForm Model="_form" OnValidSubmit="CreateAsync" FormName="milestone-create"><DataAnnotationsValidator/><div class="form-grid"><label>Name <InputText @bind-Value="_form.Name" maxlength="200"/></label><label>Description <InputText @bind-Value="_form.Description" maxlength="4000"/></label><label>Due date <InputDate @bind-Value="_form.DueDate"/></label></div><button disabled="@_saving">Add milestone</button></EditForm></section> }
+<section class="module-panel"><h2>Milestone register</h2>@if(_milestones.Count==0){<p class="empty-state">No milestones for this project.</p>}else{<div class="table-scroll"><table class="data-table"><thead><tr><th>Name</th><th>Due</th><th>Status</th><th>Actions</th></tr></thead><tbody>@foreach(var item in _milestones){<tr @key="item.Id"><td>@item.Name</td><td>@(item.DueDate?.ToString("yyyy-MM-dd") ?? "—")</td><td>@item.Status</td><td>@if(_canManage){@foreach(var s in NextStatuses(item.Status)){<button class="button button-secondary button-small" disabled="@_saving" @onclick="()=>SetStatusAsync(item,s)">@Action(s)</button>}}</td></tr>}</tbody></table></div>}</section> }
+</article>
+@code { private IReadOnlyList<ProjectResponse> _projects=[]; private IReadOnlyList<MilestoneResponse> _milestones=[]; private Guid _projectId; private FormModel _form=new(); private string? _error; private bool _saving; private bool _canManage;
+protected override async Task OnInitializedAsync(){var user=(await AuthenticationStateProvider.GetAuthenticationStateAsync()).User;_canManage=(await Authorization.AuthorizeAsync(user,null,ProjectsPermissions.Manage)).Succeeded;_projects=await Projects.ListProjectsAsync(CancellationToken.None);if(_projects.Count>0){_projectId=_projects[0].Id;await LoadAsync();}}
+private async Task LoadAsync(){if(_projectId!=Guid.Empty)_milestones=await Projects.ListMilestonesAsync(_projectId,CancellationToken.None);}
+private async Task CreateAsync(){await SaveAsync(()=>Projects.SaveMilestoneAsync(null,new(_projectId,_form.Name,_form.Description,_form.DueDate,ProjectWorkStatus.NotStarted),CancellationToken.None));_form=new();}
+private Task SetStatusAsync(MilestoneResponse x,ProjectWorkStatus s)=>SaveAsync(()=>Projects.SaveMilestoneAsync(x.Id,new(x.ProjectId,x.Name,x.Description,x.DueDate,s,x.ConcurrencyStamp),CancellationToken.None));
+private async Task SaveAsync(Func<Task<MilestoneResponse>> op){_saving=true;_error=null;try{await op();await LoadAsync();}catch(ProjectsValidationException e){_error=string.Join(" ",e.Errors.SelectMany(x=>x.Value));}catch(ProjectsConcurrencyException e){_error=e.Message;}finally{_saving=false;}}
+private static IReadOnlyList<ProjectWorkStatus> NextStatuses(ProjectWorkStatus s)=>s switch{ProjectWorkStatus.NotStarted=>[ProjectWorkStatus.InProgress,ProjectWorkStatus.Blocked],ProjectWorkStatus.InProgress=>[ProjectWorkStatus.Completed,ProjectWorkStatus.Blocked],ProjectWorkStatus.Blocked=>[ProjectWorkStatus.InProgress],_=>[]};
+private static string Action(ProjectWorkStatus s)=>s switch{ProjectWorkStatus.InProgress=>"Start / resume",ProjectWorkStatus.Completed=>"Complete",ProjectWorkStatus.Blocked=>"Block",_=>s.ToString()};
+private sealed class FormModel{[System.ComponentModel.DataAnnotations.Required,System.ComponentModel.DataAnnotations.StringLength(200)]public string Name{get;set;}="";[System.ComponentModel.DataAnnotations.StringLength(4000)]public string? Description{get;set;}public DateOnly? DueDate{get;set;}}
+}

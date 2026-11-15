@@ -1,0 +1,114 @@
+@baseUrl = http://localhost:5000/api/v1/manufacturing
+@bomId = 00000000-0000-0000-0000-000000000003
+@workOrderId = 00000000-0000-0000-0000-000000000004
+
+### Create a draft bill of materials
+POST {{baseUrl}}/bills-of-material
+Content-Type: application/json
+
+{
+  "number": "BOM-0001",
+  "productId": "00000000-0000-0000-0000-000000000001",
+  "revision": "A",
+  "outputQuantity": 1,
+  "components": [
+    {
+      "componentProductId": "00000000-0000-0000-0000-000000000002",
+      "quantity": 2,
+      "unitCode": "EA",
+      "notes": null
+    }
+  ],
+  "notes": "Initial assembly specification"
+}
+
+### Search bills of materials
+GET {{baseUrl}}/bills-of-material?state=Draft
+
+### Get a bill of materials
+GET {{baseUrl}}/bills-of-material/{{bomId}}
+
+### Update a draft bill of materials
+PUT {{baseUrl}}/bills-of-material/{{bomId}}
+Content-Type: application/json
+
+{
+  "number": "BOM-0001",
+  "productId": "00000000-0000-0000-0000-000000000001",
+  "revision": "A",
+  "outputQuantity": 1,
+  "components": [
+    {
+      "componentProductId": "00000000-0000-0000-0000-000000000002",
+      "quantity": 3,
+      "unitCode": "EA",
+      "notes": null
+    }
+  ],
+  "notes": "Updated component quantity",
+  "concurrencyStamp": "copy-from-bill-of-material-response"
+}
+
+### Activate a bill of materials
+POST {{baseUrl}}/bills-of-material/{{bomId}}/activate
+Content-Type: application/json
+
+{
+  "concurrencyStamp": "copy-from-bill-of-material-response"
+}
+
+### Retire a bill of materials
+POST {{baseUrl}}/bills-of-material/{{bomId}}/retire
+Content-Type: application/json
+
+{
+  "concurrencyStamp": "copy-from-bill-of-material-response"
+}
+
+### Search work orders
+GET {{baseUrl}}/work-orders?state=Draft
+
+### Get a work order
+GET {{baseUrl}}/work-orders/{{workOrderId}}
+
+### Create a work order (use an active bill-of-material ID)
+POST {{baseUrl}}/work-orders
+Content-Type: application/json
+
+{
+  "number": "WO-0001",
+  "billOfMaterialId": "{{bomId}}",
+  "plannedQuantity": 10,
+  "plannedStartDate": "2026-11-09",
+  "plannedEndDate": "2026-11-10",
+  "notes": "First production run"
+}
+
+### Move a work order from Draft to Released
+POST {{baseUrl}}/work-orders/{{workOrderId}}/transition
+Content-Type: application/json
+
+{
+  "state": "Released",
+  "notes": "Materials and capacity confirmed",
+  "concurrencyStamp": "copy-from-work-order-response"
+}
+
+### Read work-order production status history
+GET {{baseUrl}}/work-orders/{{workOrderId}}/status-history
+
+### Record a quality inspection
+POST {{baseUrl}}/work-orders/{{workOrderId}}/inspections
+Content-Type: application/json
+
+{
+  "number": "QI-0001",
+  "sampleQuantity": 2,
+  "decision": "Accepted",
+  "inspectedAtUtc": "2026-11-10T16:00:00Z",
+  "inspector": "Quality team",
+  "notes": "Sample passed visual inspection"
+}
+
+### List quality inspections for a work order
+GET {{baseUrl}}/work-orders/{{workOrderId}}/inspections

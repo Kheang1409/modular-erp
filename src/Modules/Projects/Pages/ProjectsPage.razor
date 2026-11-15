@@ -1,0 +1,131 @@
+﻿@page "/projects/register"
+@attribute [Authorize(Policy = ProjectsPermissions.Read)]
+@inject IProjectsService Projects
+@inject NavigationManager Navigation
+
+<PageTitle>Projects</PageTitle>
+<article class="card entity-page module-workspace">
+    <div class="page-heading"><div><p class="eyebrow">Work management</p><h1>Projects</h1><p class="muted">Plan and track project delivery.</p></div><a class="button" href="#project-create">New project</a></div>
+@if (_error is not null) { <div class="notice notice-error" role="alert">@_error</div> }
+    <AuthorizeView Policy="@ProjectsPermissions.Manage" Context="projectManage">
+        <section id="project-create" class="module-panel" aria-labelledby="new-project-heading">
+            <h2 id="new-project-heading">New project</h2>
+            <EditForm Model="_form" OnValidSubmit="CreateAsync" FormName="projects-create">
+                <DataAnnotationsValidator /><ValidationSummary />
+                <div class="form-grid">
+                    <label>Name <InputText @bind-Value="_form.Name" maxlength="200" /></label>
+                    <label>Description <InputTextArea @bind-Value="_form.Description" maxlength="4000" /></label>
+                    <label>Status <InputSelect @bind-Value="_form.Status">@foreach (var status in Enum.GetValues<ProjectStatus>()) { <option value="@status">@status</option> }</InputSelect></label>
+                    <label>Start date <InputDate @bind-Value="_form.StartDate" /></label>
+                    <label>End date <InputDate @bind-Value="_form.EndDate" /></label>
+                </div>
+                <button type="submit" disabled="@_saving">Create project</button>
+            </EditForm>
+        </section>
+    </AuthorizeView>
+    <section class="module-panel" aria-labelledby="project-list"><h2 id="project-list">Project records</h2>
+    @if (_projects is null) { <p class="loading-state" role="status">Loading projects…</p> }
+    else if (_projects.Count == 0) { <div class="empty-state"><h3>No projects yet</h3><p>Create a project to start planning delivery.</p></div> }
+    else
+    {
+        <div class="table-scroll" tabindex="0"><table>
+            <thead><tr><th>Project</th><th>Status</th><th>Start</th><th>End</th><th>Actions</th></tr></thead>
+            <tbody>
+                @foreach (var project in _projects)
+                {
+                    <tr><td><a class="entity-link" href="/projects"><strong>@project.Name</strong></a></td><td>@project.Status</td><td>@project.StartDate</td><td>@project.EndDate</td><td>
+                        <AuthorizeView Policy="@ProjectsPermissions.Manage" Context="projectActions">
+                            @foreach (var status in NextProjectStatuses(project.Status)) { <button type="button" class="button-secondary" disabled="@_saving" @onclick="() => SetProjectStatusAsync(project, status)">@ProjectStatusAction(status)</button> }
+                        </AuthorizeView>
+                    </td></tr>
+                }
+            </tbody>
+        </table></div>
+    }
+    </section>
+</article>
+
+@code {
+
+    protected override void OnInitialized() => Navigation.NavigateTo("/projects", replace: true);
+    private IReadOnlyList<ProjectResponse>? _projects;
+    private string? _error;
+    private ProjectForm _form = new();
+    private bool _saving;
+
+    protected override Task OnInitializedAsync() => RefreshAsync();
+
+    private async Task CreateAsync()
+    {
+        _error = null;
+        _saving = true;
+        try
+        {
+            await Projects.CreateProjectAsync(new(_form.Name, _form.Description, _form.Status,
+                _form.StartDate, _form.EndDate), CancellationToken.None);
+            _form = new();
+            await RefreshAsync();
+        }
+        catch (ProjectsValidationException exception)
+        {
+            _error = string.Join(" ", exception.Errors.SelectMany(x => x.Value));
+        }
+        finally { _saving = false; }
+    }
+
+    private async Task RefreshAsync()
+    {
+        _projects = await Projects.ListProjectsAsync(CancellationToken.None);
+    }
+
+    private Task SetProjectStatusAsync(ProjectResponse project, ProjectStatus status) => SaveAsync(() =>
+        Projects.UpdateProjectAsync(project.Id,
+            new(project.Name, project.Description, status, project.StartDate, project.EndDate, project.ConcurrencyStamp),
+            CancellationToken.None));
+
+    private static IReadOnlyList<ProjectStatus> NextProjectStatuses(ProjectStatus status) => status switch
+    {
+        ProjectStatus.Planned => [ProjectStatus.Active, ProjectStatus.Cancelled],
+        ProjectStatus.Active => [ProjectStatus.OnHold, ProjectStatus.Completed, ProjectStatus.Cancelled],
+        ProjectStatus.OnHold => [ProjectStatus.Active, ProjectStatus.Cancelled],
+        _ => []
+    };
+
+    private static string ProjectStatusAction(ProjectStatus status) => status switch
+    {
+        ProjectStatus.Active => "Start",
+        ProjectStatus.OnHold => "Hold",
+        ProjectStatus.Cancelled => "Cancel",
+        _ => status.ToString()
+    };
+
+    private async Task SaveAsync<T>(Func<Task<T>> operation)
+    {
+        _error = null;
+        _saving = true;
+        try { await operation(); await RefreshAsync(); }
+        catch (ProjectsValidationException exception) { _error = string.Join(" ", exception.Errors.SelectMany(x => x.Value)); }
+        catch (ProjectsConcurrencyException exception) { _error = exception.Message; }
+        finally { _saving = false; }
+    }
+
+    private sealed class ProjectForm
+    {
+        [System.ComponentModel.DataAnnotations.Required]
+        [System.ComponentModel.DataAnnotations.StringLength(200)]
+        public string Name { get; set; } = string.Empty;
+        [System.ComponentModel.DataAnnotations.StringLength(4000)]
+        public string? Description { get; set; }
+        public ProjectStatus Status { get; set; } = ProjectStatus.Planned;
+        public DateOnly? StartDate { get; set; }
+        public DateOnly? EndDate { get; set; }
+    }
+}
+
+
+
+
+
+
+
+

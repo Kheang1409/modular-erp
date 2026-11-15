@@ -1,0 +1,127 @@
+@page "/projects/{ProjectId:guid}"
+@attribute [Authorize(Policy = ProjectsPermissions.Read)]
+@using Erp.Abstractions.Organization
+@inject IProjectsService Projects
+@inject ICompanyUserDirectory CompanyUsers
+
+<PageTitle>@(_project?.Name ?? "Project")</PageTitle>
+<article class="card entity-page module-workspace project-detail-page">
+    <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/projects">Projects</a><span aria-hidden="true">/</span><span>@(_project?.Name ?? "Project details")</span></nav>
+    @if (_error is not null) { <div class="notice notice-error" role="alert">@_error</div> }
+    @if (_message is not null) { <div class="notice notice-success" role="status">@_message</div> }
+    @if (_loading) { <p class="loading-state" role="status">Loading project…</p> }
+    else if (_project is null) { <div class="empty-state"><h1>Project not found</h1><p>This project is unavailable in the current company.</p><a class="button button-secondary" href="/projects">Back to projects</a></div> }
+    else {
+        <header class="project-detail-heading">
+            <div><span class="status-badge @StatusClass(_project.Status)">@StatusLabel(_project.Status)</span><h1>@_project.Name</h1><p>@(string.IsNullOrWhiteSpace(_project.Description) ? "No project brief yet." : _project.Description)</p></div>
+            <AuthorizeView Policy="@ProjectsPermissions.Manage" Context="projectManage">
+                <div class="project-card-actions">@foreach (var next in NextProjectStatuses(_project.Status)) { <button class="button button-secondary" disabled="@_saving" @onclick="() => ChangeProjectStatusAsync(next)">@StatusAction(next)</button> }<button class="button button-quiet" @onclick="() => _editingProject = !_editingProject">@(_editingProject ? "Close edit" : "Edit project")</button></div>
+            </AuthorizeView>
+        </header>
+        @if (_editingProject) { <AuthorizeView Policy="@ProjectsPermissions.Manage" Context="editAccess"><section class="module-panel"><h2>Edit project details</h2><EditForm Model="_projectForm" OnValidSubmit="UpdateProjectAsync" FormName="project-update"><DataAnnotationsValidator /><div class="form-grid"><label>Name<InputText @bind-Value="_projectForm.Name" maxlength="200" /></label><label>Status<InputSelect @bind-Value="_projectForm.Status">@foreach (var s in EditableProjectStatuses(_project!.Status)) { <option value="@s">@StatusLabel(s)</option> }</InputSelect></label><label>Start date<InputDate @bind-Value="_projectForm.StartDate" /></label><label>End date<InputDate @bind-Value="_projectForm.EndDate" /></label><label class="wide">Brief<InputTextArea @bind-Value="_projectForm.Description" maxlength="4000" /></label></div><button type="submit" disabled="@_saving">Save project</button></EditForm></section></AuthorizeView> }
+        <section class="project-detail-metrics" aria-label="Project metrics"><div class="project-metric"><span>Tasks complete</span><strong>@_tasks.Count(x => x.Status == ProjectWorkStatus.Completed) / @_tasks.Count</strong><small>@ProgressPercent% complete</small></div><div class="project-metric"><span>Milestones</span><strong>@_milestones.Count(x => x.Status == ProjectWorkStatus.Completed) / @_milestones.Count</strong><small>completed</small></div><div class="project-metric"><span>Hours last 90 days</span><strong>@_timeEntries.Sum(x => x.Hours).ToString("N1")</strong><small>@_timeEntries.Where(x => x.IsBillable).Sum(x => x.Hours).ToString("N1") billable</small></div><div class="project-metric"><span>Target date</span><strong class="metric-date">@(_project.EndDate?.ToString("MMM d, yyyy") ?? "Not set")</strong><small>@DateSummary</small></div></section>
+
+        <div class="project-work-grid">
+            <section class="module-panel" id="milestones"><div class="section-heading"><div><h2>Milestones</h2><p class="muted">Key delivery checkpoints</p></div><a class="text-link" href="/projects/milestones">Milestone workspace</a></div>
+                <AuthorizeView Policy="@ProjectsPermissions.Manage" Context="milestoneManage"><EditForm Model="_milestoneForm" OnValidSubmit="CreateMilestoneAsync" FormName="project-milestone-create"><DataAnnotationsValidator /><div class="inline-create-grid"><label>Milestone name<InputText @bind-Value="_milestoneForm.Name" maxlength="200" placeholder="e.g. Design approved" /></label><label>Due date<InputDate @bind-Value="_milestoneForm.DueDate" /></label><button type="submit" disabled="@_saving">Add milestone</button></div></EditForm></AuthorizeView>
+                @if (_milestones.Count == 0) { <p class="empty-state compact-empty">No milestones planned yet.</p> } else { <div class="project-list">@foreach (var item in _milestones) { <div class="project-list-row" @key="item.Id"><span class="milestone-marker @StatusClass(item.Status)" aria-hidden="true"></span><div class="project-list-main"><strong>@item.Name</strong><span>@(item.DueDate?.ToString("ddd, MMM d") ?? "No target date")</span></div><span class="status-badge @StatusClass(item.Status)">@WorkStatusLabel(item.Status)</span><AuthorizeView Policy="@ProjectsPermissions.Manage" Context="milestoneActions">@foreach (var next in NextWorkStatuses(item.Status)) { <button class="button button-quiet button-small" disabled="@_saving" @onclick="() => ChangeMilestoneStatusAsync(item, next)">@WorkStatusAction(next)</button> }</AuthorizeView></div> }</div> }
+            </section>
+
+            <section class="module-panel" id="tasks"><div class="section-heading"><div><h2>Tasks</h2><p class="muted">Assigned work and current status</p></div><a class="text-link" href="/projects/tasks">Task workspace</a></div>
+                <AuthorizeView Policy="@ProjectsPermissions.Manage" Context="taskManage"><EditForm Model="_taskForm" OnValidSubmit="CreateTaskAsync" FormName="project-task-create"><DataAnnotationsValidator /><div class="form-grid"><label>Task title<InputText @bind-Value="_taskForm.Title" maxlength="200" placeholder="Add a task" /></label><label>Milestone<InputSelect @bind-Value="_taskForm.MilestoneId"><option value="">No milestone</option>@foreach (var item in _milestones) { <option value="@item.Id">@item.Name</option> }</InputSelect></label><label>Assignee<InputSelect @bind-Value="_taskForm.AssignedUserId"><option value="">Unassigned</option>@foreach (var user in _users) { <option value="@user.Id">@user.DisplayName</option> }</InputSelect></label><label>Due date<InputDate @bind-Value="_taskForm.DueDate" /></label></div><button type="submit" disabled="@_saving">Add task</button></EditForm></AuthorizeView>
+                @if (_tasks.Count == 0) { <p class="empty-state compact-empty">No tasks added yet.</p> } else { <div class="table-scroll project-task-table"><table class="data-table"><thead><tr><th>Task</th><th>Assignee</th><th>Due</th><th>Status</th><th>Update</th></tr></thead><tbody>@foreach (var task in _tasks) { <tr @key="task.Id"><td><strong>@task.Title</strong>@if (task.MilestoneId is { } mid) { <small class="table-subtitle">@_milestones.FirstOrDefault(x => x.Id == mid)?.Name</small> }</td><td>@(_users.FirstOrDefault(x => x.Id == task.AssignedUserId)?.DisplayName ?? "Unassigned")</td><td>@(task.DueDate?.ToString("MMM d, yyyy") ?? "—")</td><td><span class="status-badge @StatusClass(task.Status)">@WorkStatusLabel(task.Status)</span></td><td><AuthorizeView Policy="@ProjectsPermissions.Manage" Context="taskActions">@foreach (var next in NextWorkStatuses(task.Status)) { <button class="button button-quiet button-small" disabled="@_saving" @onclick="() => ChangeTaskStatusAsync(task, next)">@WorkStatusAction(next)</button> }</AuthorizeView></td></tr> }</tbody></table></div> }
+            </section>
+        </div>
+
+        <section class="module-panel" id="time"><div class="section-heading"><div><h2>Time and billable hours</h2><p class="muted">Hours captured over the last 90 days. Billable hours are recorded for later financial workflows.</p></div><a class="text-link" href="/projects/time">Time workspace</a></div>
+            <AuthorizeView Policy="@ProjectsPermissions.Manage" Context="timeManage"><EditForm Model="_timeForm" OnValidSubmit="CreateTimeEntryAsync" FormName="project-time-create"><DataAnnotationsValidator /><div class="inline-create-grid time-create-grid"><label>Task<InputSelect @bind-Value="_timeForm.TaskId"><option value="">Project-level time</option>@foreach (var task in _tasks) { <option value="@task.Id">@task.Title</option> }</InputSelect></label><label>Work date<InputDate @bind-Value="_timeForm.WorkDate" /></label><label>Hours<InputNumber @bind-Value="_timeForm.Hours" min="0.01" max="24" step="0.25" /></label><label class="checkbox-field compact"><InputCheckbox @bind-Value="_timeForm.IsBillable" /><span>Billable hours</span></label><button type="submit" disabled="@_saving">Record time</button></div><label class="project-time-description">Description<InputText @bind-Value="_timeForm.Description" maxlength="1000" placeholder="What work was done?" /></label></EditForm></AuthorizeView>
+            @if (_timeEntries.Count == 0) { <p class="empty-state compact-empty">No time recorded in the last 90 days.</p> } else { <div class="table-scroll"><table class="data-table"><thead><tr><th>Date</th><th>Work</th><th>Task</th><th>Hours</th><th>Type</th></tr></thead><tbody>@foreach (var entry in _timeEntries.Take(20)) { <tr @key="entry.Id"><td>@entry.WorkDate.ToString("MMM d, yyyy")</td><td>@entry.Description</td><td>@(_tasks.FirstOrDefault(x => x.Id == entry.TaskId)?.Title ?? "Project-level")</td><td>@entry.Hours.ToString("N2")</td><td>@(entry.IsBillable ? "Billable" : "Non-billable")</td></tr> }</tbody></table></div> }
+        </section>
+    }
+</article>
+
+@code {
+    [Parameter] public Guid ProjectId { get; set; }
+    private ProjectResponse? _project;
+    private IReadOnlyList<MilestoneResponse> _milestones = [];
+    private IReadOnlyList<ProjectTaskResponse> _tasks = [];
+    private IReadOnlyList<TimeEntryResponse> _timeEntries = [];
+    private IReadOnlyList<CompanyUserReference> _users = [];
+    private ProjectEditForm _projectForm = new();
+    private MilestoneForm _milestoneForm = new();
+    private TaskForm _taskForm = new();
+    private TimeForm _timeForm = new();
+    private string? _error, _message;
+    private bool _loading = true, _saving, _editingProject;
+    private int ProgressPercent => _tasks.Count == 0 ? 0 : (int)Math.Round(100m * _tasks.Count(x => x.Status == ProjectWorkStatus.Completed) / _tasks.Count);
+    private string DateSummary => _project?.EndDate is not { } end ? "No target date set" : end < DateOnly.FromDateTime(DateTime.Today) && _project.Status != ProjectStatus.Completed ? "Past target date" : $"{Math.Max(0, end.DayNumber - DateOnly.FromDateTime(DateTime.Today).DayNumber)} days remaining";
+
+    protected override Task OnParametersSetAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _error = null;
+        try {
+            _project = await Projects.GetProjectAsync(ProjectId, CancellationToken.None);
+            if (_project is null) return;
+            _projectForm = new() { Name = _project.Name, Description = _project.Description, Status = _project.Status, StartDate = _project.StartDate, EndDate = _project.EndDate, ConcurrencyStamp = _project.ConcurrencyStamp };
+            _milestones = await Projects.ListMilestonesAsync(ProjectId, CancellationToken.None);
+            _tasks = await Projects.ListTasksAsync(ProjectId, null, CancellationToken.None);
+            _timeEntries = await Projects.ListTimeEntriesAsync(ProjectId, DateOnly.FromDateTime(DateTime.Today.AddDays(-90)), null, CancellationToken.None);
+            _users = await CompanyUsers.ListAsync(CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or ProjectsValidationException) { _error = "Project information could not be loaded. Refresh or check your company access."; }
+        finally { _loading = false; }
+    }
+
+    private async Task UpdateProjectAsync() => await SaveAsync(async () => {
+        var updated = await Projects.UpdateProjectAsync(ProjectId, new(_projectForm.Name, _projectForm.Description, _projectForm.Status, _projectForm.StartDate, _projectForm.EndDate, _projectForm.ConcurrencyStamp), CancellationToken.None);
+        _project = updated; _projectForm.ConcurrencyStamp = updated.ConcurrencyStamp; _editingProject = false;
+    }, "Project details saved.");
+
+    private Task ChangeProjectStatusAsync(ProjectStatus status) => SaveAsync(async () => {
+        var current = _project!;
+        _project = await Projects.UpdateProjectAsync(ProjectId, new(current.Name, current.Description, status, current.StartDate, current.EndDate, current.ConcurrencyStamp), CancellationToken.None);
+    }, $"Project moved to {StatusLabel(status).ToLowerInvariant()}.");
+
+    private async Task CreateMilestoneAsync() => await SaveAsync(async () => { await Projects.SaveMilestoneAsync(null, new(ProjectId, _milestoneForm.Name, _milestoneForm.Description, _milestoneForm.DueDate, ProjectWorkStatus.NotStarted), CancellationToken.None); _milestoneForm = new(); }, "Milestone added.");
+    private Task ChangeMilestoneStatusAsync(MilestoneResponse item, ProjectWorkStatus status) => SaveAsync(async () => { await Projects.SaveMilestoneAsync(item.Id, new(ProjectId, item.Name, item.Description, item.DueDate, status, item.ConcurrencyStamp), CancellationToken.None); }, $"Milestone moved to {WorkStatusLabel(status).ToLowerInvariant()}.");
+    private async Task CreateTaskAsync() => await SaveAsync(async () => { await Projects.SaveTaskAsync(null, new(ProjectId, _taskForm.MilestoneId, _taskForm.Title, _taskForm.Description, _taskForm.DueDate, ProjectWorkStatus.NotStarted, _taskForm.AssignedUserId), CancellationToken.None); _taskForm = new(); }, "Task added.");
+    private Task ChangeTaskStatusAsync(ProjectTaskResponse item, ProjectWorkStatus status) => SaveAsync(async () => { await Projects.SaveTaskAsync(item.Id, new(ProjectId, item.MilestoneId, item.Title, item.Description, item.DueDate, status, item.AssignedUserId, item.ConcurrencyStamp), CancellationToken.None); }, $"Task moved to {WorkStatusLabel(status).ToLowerInvariant()}.");
+    private async Task CreateTimeEntryAsync() => await SaveAsync(async () => { await Projects.SaveTimeEntryAsync(null, new(ProjectId, _timeForm.TaskId, _timeForm.WorkDate, _timeForm.Hours, _timeForm.IsBillable, _timeForm.Description), CancellationToken.None); _timeForm = new(); }, "Time entry recorded.");
+
+    private async Task SaveAsync(Func<Task> operation, string success)
+    {
+        _saving = true; _error = _message = null;
+        try { await operation(); await LoadListsAsync(); _message = success; }
+        catch (ProjectsValidationException ex) { _error = string.Join(" ", ex.Errors.SelectMany(x => x.Value)); }
+        catch (ProjectsConcurrencyException) { _error = "This record changed in another session. The latest data has been loaded; review it and retry."; await LoadAsync(); }
+        catch (KeyNotFoundException) { _error = "The project or related record no longer exists in this company."; }
+        catch (HttpRequestException) { _error = "The request could not be completed. Try again."; }
+        finally { _saving = false; }
+    }
+
+    private async Task LoadListsAsync()
+    {
+        _project = await Projects.GetProjectAsync(ProjectId, CancellationToken.None);
+        _milestones = await Projects.ListMilestonesAsync(ProjectId, CancellationToken.None);
+        _tasks = await Projects.ListTasksAsync(ProjectId, null, CancellationToken.None);
+        _timeEntries = await Projects.ListTimeEntriesAsync(ProjectId, DateOnly.FromDateTime(DateTime.Today.AddDays(-90)), null, CancellationToken.None);
+        if (_project is not null) _projectForm.ConcurrencyStamp = _project.ConcurrencyStamp;
+    }
+
+    private static IReadOnlyList<ProjectStatus> NextProjectStatuses(ProjectStatus status) => status switch { ProjectStatus.Planned => [ProjectStatus.Active, ProjectStatus.Cancelled], ProjectStatus.Active => [ProjectStatus.OnHold, ProjectStatus.Completed, ProjectStatus.Cancelled], ProjectStatus.OnHold => [ProjectStatus.Active, ProjectStatus.Cancelled], _ => [] };
+    private static IReadOnlyList<ProjectStatus> EditableProjectStatuses(ProjectStatus status) => [status, .. NextProjectStatuses(status)];
+    private static IReadOnlyList<ProjectWorkStatus> NextWorkStatuses(ProjectWorkStatus status) => status switch { ProjectWorkStatus.NotStarted => [ProjectWorkStatus.InProgress, ProjectWorkStatus.Blocked], ProjectWorkStatus.InProgress => [ProjectWorkStatus.Completed, ProjectWorkStatus.Blocked], ProjectWorkStatus.Blocked => [ProjectWorkStatus.InProgress], _ => [] };
+    private static string StatusAction(ProjectStatus status) => status switch { ProjectStatus.Active => "Start", ProjectStatus.OnHold => "Put on hold", ProjectStatus.Completed => "Complete", ProjectStatus.Cancelled => "Cancel", _ => status.ToString() };
+    private static string WorkStatusAction(ProjectWorkStatus status) => status switch { ProjectWorkStatus.InProgress => "Start", ProjectWorkStatus.Completed => "Complete", ProjectWorkStatus.Blocked => "Block", _ => "Resume" };
+    private static string StatusLabel(ProjectStatus status) => status switch { ProjectStatus.Active => "In progress", ProjectStatus.OnHold => "On hold", _ => status.ToString() };
+    private static string WorkStatusLabel(ProjectWorkStatus status) => status switch { ProjectWorkStatus.NotStarted => "To do", ProjectWorkStatus.InProgress => "In progress", _ => status.ToString() };
+    private static string StatusClass(ProjectStatus status) => status switch { ProjectStatus.Active => "is-success", ProjectStatus.Completed => "is-neutral", ProjectStatus.OnHold => "is-warning", ProjectStatus.Cancelled => "is-muted", _ => "is-planned" };
+    private static string StatusClass(ProjectWorkStatus status) => status switch { ProjectWorkStatus.Completed => "is-success", ProjectWorkStatus.InProgress => "is-neutral", ProjectWorkStatus.Blocked => "is-warning", _ => "is-muted" };
+
+    private sealed class ProjectEditForm { [System.ComponentModel.DataAnnotations.Required, System.ComponentModel.DataAnnotations.StringLength(200)] public string Name { get; set; } = ""; [System.ComponentModel.DataAnnotations.StringLength(4000)] public string? Description { get; set; } public ProjectStatus Status { get; set; } public DateOnly? StartDate { get; set; } public DateOnly? EndDate { get; set; } public string? ConcurrencyStamp { get; set; } }
+    private sealed class MilestoneForm { [System.ComponentModel.DataAnnotations.Required, System.ComponentModel.DataAnnotations.StringLength(200)] public string Name { get; set; } = ""; public string? Description { get; set; } public DateOnly? DueDate { get; set; } }
+    private sealed class TaskForm { [System.ComponentModel.DataAnnotations.Required, System.ComponentModel.DataAnnotations.StringLength(200)] public string Title { get; set; } = ""; public string? Description { get; set; } public Guid? MilestoneId { get; set; } public Guid? AssignedUserId { get; set; } public DateOnly? DueDate { get; set; } }
+    private sealed class TimeForm { public Guid? TaskId { get; set; } public DateOnly WorkDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public decimal Hours { get; set; } = 1m; public bool IsBillable { get; set; } public string? Description { get; set; } }
+}

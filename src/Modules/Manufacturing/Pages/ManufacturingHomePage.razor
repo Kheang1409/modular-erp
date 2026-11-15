@@ -1,0 +1,56 @@
+@page "/manufacturing"
+@attribute [Authorize(Policy = ManufacturingPermissions.Read)]
+@inject HttpClient Http
+
+<PageTitle>Manufacturing</PageTitle>
+<article class="card entity-page module-workspace manufacturing-home">
+    <header class="page-heading manufacturing-heading">
+        <div><p class="eyebrow">Operations</p><h1>Manufacturing</h1><p class="muted">Production readiness, work in progress and quality at a glance.</p></div>
+        <AuthorizeView Policy="@ManufacturingPermissions.WorkOrderManage"><a class="button" href="/manufacturing/work-orders">Plan production</a></AuthorizeView>
+    </header>
+    @if (_error is not null) { <div class="notice notice-error" role="alert">@_error</div> }
+    @if (_loading) { <p class="loading-state" role="status">Loading manufacturing overview…</p> }
+    else {
+        <section class="manufacturing-metrics" aria-label="Production overview">
+            <a class="manufacturing-metric" href="/manufacturing/work-orders"><span>Active orders</span><strong>@ActiveOrders.Count</strong><small>Released or in progress</small></a>
+            <a class="manufacturing-metric" href="/manufacturing/work-orders"><span>In progress</span><strong>@_orders.Count(x => x.State == WorkOrderState.InProgress)</strong><small>On the production floor</small></a>
+            <a class="manufacturing-metric" href="/manufacturing/bills"><span>Active recipes</span><strong>@_bills.Count(x => x.State == BillOfMaterialState.Active)</strong><small>Available to schedule</small></a>
+            <a class="manufacturing-metric" href="/manufacturing/capacity"><span>Daily labor capacity</span><strong>@(_capacity?.HoursPerDay.ToString("N1") ?? "—")</strong><small>Hours per day</small></a>
+        </section>
+
+        <div class="manufacturing-work-grid">
+            <section class="module-panel" aria-labelledby="production-heading">
+                <div class="section-heading"><div><p class="eyebrow">Live schedule</p><h2 id="production-heading">Production orders</h2><p class="muted">Orders currently reserving capacity or component stock.</p></div><a class="text-link" href="/manufacturing/work-orders">All work orders</a></div>
+                @if (ActiveOrders.Count == 0) { <div class="empty-state compact-empty"><h3>Nothing in the schedule</h3><p>Release a work order to reserve capacity and components.</p><AuthorizeView Policy="@ManufacturingPermissions.WorkOrderManage"><a class="button button-secondary" href="/manufacturing/work-orders">Open work orders</a></AuthorizeView></div> }
+                else { <div class="table-scroll"><table class="data-table"><thead><tr><th>Order</th><th>Product</th><th>Planned window</th><th>Quantity</th><th>Status</th></tr></thead><tbody>@foreach (var order in ActiveOrders.Take(8)) { <tr @key="order.Id"><td><a class="manufacturing-order-link" href="/manufacturing/work-orders">@order.Number</a><small class="table-subtitle">@order.BillOfMaterialNumber · Rev @order.BillOfMaterialRevision</small></td><td>@order.ProductSku — @order.ProductName</td><td>@(order.PlannedStartDate?.ToString("MMM d") ?? "Not scheduled") – @(order.PlannedEndDate?.ToString("MMM d") ?? "—")</td><td>@order.PlannedQuantity.ToString("N2") @order.UnitCode</td><td><span class="status-badge @(order.State == WorkOrderState.InProgress ? "is-success" : "is-neutral")">@order.State</span></td></tr> }</tbody></table></div> }
+            </section>
+            <aside class="manufacturing-shortcuts">
+                <section class="module-panel"><p class="eyebrow">Plan</p><h2>Production setup</h2><p class="muted">Maintain the recipes, schedule and daily labor limit used when work is released.</p><a class="quick-action" href="/manufacturing/bills"><span class="quick-action-icon">≡</span> Bills of materials <span class="link-arrow" aria-hidden="true">→</span></a><a class="quick-action" href="/manufacturing/capacity"><span class="quick-action-icon">◷</span> Capacity policy <span class="link-arrow" aria-hidden="true">→</span></a></section>
+                <section class="module-panel"><p class="eyebrow">Quality</p><h2>Inspection policy</h2><p class="muted">Inspections are captured against active or completed work orders.</p><a class="button button-secondary" href="/manufacturing/work-orders">Review work orders</a></section>
+            </aside>
+        </div>
+        @if (_bills.Count(x => x.State == BillOfMaterialState.Draft) > 0) { <p class="manufacturing-footnote">@_bills.Count(x => x.State == BillOfMaterialState.Draft) draft bill@(_bills.Count(x => x.State == BillOfMaterialState.Draft) == 1 ? "" : "s") need activation before they can be scheduled. <a href="/manufacturing/bills">Review bills of materials</a>.</p> }
+    }
+</article>
+
+@code {
+    private IReadOnlyList<BillOfMaterialResponse> _bills = [];
+    private IReadOnlyList<WorkOrderResponse> _orders = [];
+    private ProductionCapacityDto? _capacity;
+    private bool _loading = true;
+    private string? _error;
+    private IReadOnlyList<WorkOrderResponse> ActiveOrders => _orders.Where(x => x.State is WorkOrderState.Released or WorkOrderState.InProgress).OrderBy(x => x.PlannedStartDate).ThenBy(x => x.Number).ToArray();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try {
+            var billsTask = Http.GetFromJsonAsync<List<BillOfMaterialResponse>>("api/v1/manufacturing/bills-of-material");
+            var ordersTask = Http.GetFromJsonAsync<List<WorkOrderResponse>>("api/v1/manufacturing/work-orders");
+            var capacityTask = Http.GetFromJsonAsync<ProductionCapacityDto>("api/v1/manufacturing/capacity");
+            await Task.WhenAll(billsTask!, ordersTask!, capacityTask!);
+            _bills = billsTask.Result ?? []; _orders = ordersTask.Result ?? []; _capacity = capacityTask.Result;
+        }
+        catch (HttpRequestException) { _error = "Manufacturing information could not be loaded. Check your company access and refresh."; }
+        finally { _loading = false; }
+    }
+}

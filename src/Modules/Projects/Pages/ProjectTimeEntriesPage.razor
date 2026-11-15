@@ -1,0 +1,19 @@
+@page "/projects/time"
+@attribute [Authorize(Policy = ProjectsPermissions.Read)]
+@inject IProjectsService Projects
+<PageTitle>Project time entries</PageTitle>
+<article class="card entity-page module-workspace"><div class="page-heading"><div><p class="eyebrow">Work management</p><h1>Time entries</h1><p class="muted">Record project hours and review recent time captured.</p></div></div>
+@if(_error is not null){<p role="alert">@_error</p>}
+    <section class="module-panel"><h2>Project</h2><InputSelect @bind-Value="_projectId" @bind-Value:after="LoadAsync"><option value="@Guid.Empty">Choose a project</option>@foreach(var p in _projects){<option value="@p.Id">@p.Name</option>}</InputSelect></section>
+    @if(_projectId!=Guid.Empty){<AuthorizeView Policy="@ProjectsPermissions.Manage" Context="timeManage"><section class="module-panel"><h2>Record time</h2><EditForm Model="_form" OnValidSubmit="CreateAsync" FormName="project-time-create"><DataAnnotationsValidator/><div class="form-grid"><label>Task <InputSelect @bind-Value="_form.TaskId"><option value="">Project-level time</option>@foreach(var t in _tasks){<option value="@t.Id">@t.Title</option>}</InputSelect></label><label>Work date <InputDate @bind-Value="_form.WorkDate"/></label><label>Hours <InputNumber @bind-Value="_form.Hours" min="0.01" max="24" step="0.01"/></label><label><InputCheckbox @bind-Value="_form.IsBillable"/> Billable</label><label>Description <InputText @bind-Value="_form.Description" maxlength="2000"/></label></div><button disabled="@_saving">Record hours</button></EditForm></section></AuthorizeView>
+    <section class="module-panel"><h2>Recent entries</h2>@if(_entries.Count==0){<p class="empty-state">No time entries for this project.</p>}else{<div class="table-scroll"><table class="data-table"><thead><tr><th>Date</th><th>Task</th><th>Hours</th><th>Billable</th><th>Description</th></tr></thead><tbody>@foreach(var e in _entries){<tr @key="e.Id"><td>@e.WorkDate</td><td>@_tasks.FirstOrDefault(t=>t.Id==e.TaskId)?.Title</td><td>@e.Hours.ToString("N2")</td><td>@(e.IsBillable?"Yes":"No")</td><td>@e.Description</td></tr>}</tbody></table></div>}</section>}
+</article>
+@code {private IReadOnlyList<ProjectResponse> _projects=[];private IReadOnlyList<ProjectTaskResponse> _tasks=[];private IReadOnlyList<TimeEntryResponse> _entries=[];private Guid _projectId;private TimeForm _form=new();private string? _error;private bool _saving;
+protected override async Task OnInitializedAsync(){_projects=await Projects.ListProjectsAsync(CancellationToken.None);if(_projects.Count>0){_projectId=_projects[0].Id;await LoadAsync();}}
+private async Task LoadAsync(){if(_projectId!=Guid.Empty){_tasks=await Projects.ListTasksAsync(_projectId,null,CancellationToken.None);_entries=await Projects.ListTimeEntriesAsync(_projectId,DateOnly.FromDateTime(DateTime.Today.AddMonths(-3)),null,CancellationToken.None);}}
+private async Task CreateAsync(){_saving=true;_error=null;try{await Projects.SaveTimeEntryAsync(null,new(_projectId,_form.TaskId,_form.WorkDate,_form.Hours,_form.IsBillable,_form.Description),CancellationToken.None);_form=new();await LoadAsync();}catch(ProjectsValidationException e){_error=string.Join(" ",e.Errors.SelectMany(x=>x.Value));}catch(ProjectsConcurrencyException e){_error=e.Message;}finally{_saving=false;}}
+private sealed class TimeForm{public Guid? TaskId{get;set;}public DateOnly WorkDate{get;set;}=DateOnly.FromDateTime(DateTime.Today);public decimal Hours{get;set;}=1;public bool IsBillable{get;set;}public string? Description{get;set;}}
+}
+
+
+

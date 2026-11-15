@@ -1,0 +1,120 @@
+@page "/projects"
+@attribute [Authorize(Policy = ProjectsPermissions.Read)]
+@inject IProjectsService Projects
+
+<PageTitle>Projects</PageTitle>
+<article class="card entity-page module-workspace project-portfolio-page">
+    <header class="page-heading project-heading">
+        <div><p class="eyebrow">Delivery workspace</p><h1>Projects</h1><p class="muted">A clear view of delivery, ownership and what needs attention.</p></div>
+        <AuthorizeView Policy="@ProjectsPermissions.Manage"><a class="button" href="#new-project">New project</a></AuthorizeView>
+    </header>
+    @if (_error is not null) { <div class="notice notice-error" role="alert">@_error</div> }
+    @if (_message is not null) { <div class="notice notice-success" role="status">@_message</div> }
+    @if (_loading) { <p class="loading-state" role="status">Loading project portfolio…</p> }
+    else {
+        <section class="project-metrics" aria-label="Project summary">
+            <div class="project-metric"><span>In progress</span><strong>@_projects.Count(x => x.Status == ProjectStatus.Active)</strong><small>Active projects</small></div>
+            <div class="project-metric"><span>Planned</span><strong>@_projects.Count(x => x.Status == ProjectStatus.Planned)</strong><small>Ready to start</small></div>
+            <div class="project-metric"><span>On hold</span><strong>@_projects.Count(x => x.Status == ProjectStatus.OnHold)</strong><small>Need a decision</small></div>
+            <div class="project-metric"><span>Tasks due</span><strong>@_overdueTasks</strong><small>Past their due date</small></div>
+        </section>
+        <section class="module-panel project-portfolio" aria-labelledby="portfolio-heading">
+            <div class="section-heading"><div><h2 id="portfolio-heading">Portfolio</h2><p class="muted">@_projects.Count project@(_projects.Count == 1 ? "" : "s") in this company</p></div>
+                <div class="project-filter"><label for="project-search">Search projects</label><InputText id="project-search" @bind-Value="_search" placeholder="Name or description" /></div>
+            </div>
+            @if (_projects.Count == 0) { <div class="empty-state"><h3>No projects yet</h3><p>Create a project to plan milestones, assign tasks and capture time.</p><AuthorizeView Policy="@ProjectsPermissions.Manage"><a class="button" href="#new-project">Create first project</a></AuthorizeView></div> }
+            else if (VisibleProjects.Count == 0) { <p class="empty-state">No projects match “@_search”. Try a different search.</p> }
+            else {
+                <div class="project-card-grid">
+                    @foreach (var project in VisibleProjects) {
+                        var stats = _stats.GetValueOrDefault(project.Id) ?? new ProjectStats();
+                        <section class="project-card" @key="project.Id">
+                            <div class="project-card-top"><span class="status-badge @StatusClass(project.Status)">@StatusLabel(project.Status)</span><span class="project-date">@(project.EndDate is { } end ? $"Due {end:MMM d, yyyy}" : "No end date")</span></div>
+                            <h3><a href="/projects/@project.Id">@project.Name</a></h3>
+                            <p class="project-card-description">@(string.IsNullOrWhiteSpace(project.Description) ? "No project summary has been added." : project.Description)</p>
+                            <div class="project-progress-label"><span>Task progress</span><strong>@stats.CompletedTasks / @stats.TaskCount</strong></div>
+                            <div class="project-progress" role="progressbar" aria-label="@project.Name task progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="@stats.ProgressPercent"><span style="width:@($"{stats.ProgressPercent}%")"></span></div>
+                            <div class="project-card-meta"><span>@stats.OpenTasks open task@(stats.OpenTasks == 1 ? "" : "s")</span><span>@stats.MilestoneCount milestone@(stats.MilestoneCount == 1 ? "" : "s")</span><span>@stats.BillableHours.ToString("N1") billable h / 30d</span></div>
+                            <div class="project-card-actions"><a class="button button-secondary button-small" href="/projects/@project.Id">Open project</a>
+                                <AuthorizeView Policy="@ProjectsPermissions.Manage" Context="projectActions">
+                                    @foreach (var next in NextProjectStatuses(project.Status)) { <button class="button button-quiet button-small" disabled="@_saving" @onclick="() => SetProjectStatusAsync(project, next)">@StatusAction(next)</button> }
+                                </AuthorizeView>
+                            </div>
+                        </section>
+                    }
+                </div>
+            }
+        </section>
+        <AuthorizeView Policy="@ProjectsPermissions.Manage" Context="projectManage">
+            <section id="new-project" class="module-panel project-create-panel" aria-labelledby="new-project-heading">
+                <div class="section-heading"><div><p class="eyebrow">Get started</p><h2 id="new-project-heading">Create a project</h2><p class="muted">Set the delivery window and a short project brief.</p></div></div>
+                <EditForm Model="_form" OnValidSubmit="CreateAsync" FormName="projects-create"><DataAnnotationsValidator /><ValidationSummary />
+                    <div class="form-grid">
+                        <label>Project name<InputText @bind-Value="_form.Name" maxlength="200" placeholder="e.g. Customer portal refresh" /></label>
+                        <label>Status<InputSelect @bind-Value="_form.Status">@foreach (var status in Enum.GetValues<ProjectStatus>()) { <option value="@status">@StatusLabel(status)</option> }</InputSelect></label>
+                        <label>Start date<InputDate @bind-Value="_form.StartDate" /></label><label>Target end date<InputDate @bind-Value="_form.EndDate" /></label>
+                        <label class="wide">Project brief<InputTextArea @bind-Value="_form.Description" maxlength="4000" placeholder="What will this project deliver?" /></label>
+                    </div>
+                    <div class="form-actions"><button type="submit" disabled="@_saving">@(_saving ? "Creating…" : "Create project")</button></div>
+                </EditForm>
+            </section>
+        </AuthorizeView>
+    }
+</article>
+
+@code {
+    private IReadOnlyList<ProjectResponse> _projects = [];
+    private readonly Dictionary<Guid, ProjectStats> _stats = [];
+    private string? _error, _message;
+    private string _search = string.Empty;
+    private ProjectForm _form = new();
+    private bool _saving, _loading = true;
+    private int _overdueTasks;
+    private IReadOnlyList<ProjectResponse> VisibleProjects => string.IsNullOrWhiteSpace(_search) ? _projects :
+        _projects.Where(x => x.Name.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase) || (x.Description?.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase) ?? false)).ToArray();
+
+    protected override Task OnInitializedAsync() => RefreshAsync();
+
+    private async Task CreateAsync()
+    {
+        _error = _message = null; _saving = true;
+        try { await Projects.CreateProjectAsync(new(_form.Name, _form.Description, _form.Status, _form.StartDate, _form.EndDate), CancellationToken.None); _form = new(); _message = "Project created. Add milestones and tasks to start planning delivery."; await RefreshAsync(); }
+        catch (ProjectsValidationException ex) { _error = string.Join(" ", ex.Errors.SelectMany(x => x.Value)); }
+        finally { _saving = false; }
+    }
+
+    private async Task RefreshAsync()
+    {
+        _loading = true; _error = null;
+        try {
+            _projects = await Projects.ListProjectsAsync(CancellationToken.None);
+            _stats.Clear(); _overdueTasks = 0;
+            foreach (var project in _projects) {
+                var milestones = await Projects.ListMilestonesAsync(project.Id, CancellationToken.None);
+                var tasks = await Projects.ListTasksAsync(project.Id, null, CancellationToken.None);
+                var entries = await Projects.ListTimeEntriesAsync(project.Id, DateOnly.FromDateTime(DateTime.Today.AddDays(-30)), null, CancellationToken.None);
+                var completed = tasks.Count(x => x.Status == ProjectWorkStatus.Completed);
+                _stats[project.Id] = new(tasks.Count, completed, tasks.Count(x => x.Status is not (ProjectWorkStatus.Completed or ProjectWorkStatus.Blocked)), milestones.Count, entries.Where(x => x.IsBillable).Sum(x => x.Hours));
+                _overdueTasks += tasks.Count(x => x.Status is not (ProjectWorkStatus.Completed or ProjectWorkStatus.Blocked) && x.DueDate < DateOnly.FromDateTime(DateTime.Today));
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or ProjectsValidationException) { _error = "Project data could not be loaded. Refresh the page or check your company access."; }
+        finally { _loading = false; }
+    }
+
+    private async Task SetProjectStatusAsync(ProjectResponse project, ProjectStatus status)
+    {
+        _saving = true; _error = _message = null;
+        try { await Projects.UpdateProjectAsync(project.Id, new(project.Name, project.Description, status, project.StartDate, project.EndDate, project.ConcurrencyStamp), CancellationToken.None); _message = $"{project.Name} moved to {StatusLabel(status).ToLowerInvariant()}."; await RefreshAsync(); }
+        catch (ProjectsConcurrencyException) { _error = "This project changed in another session. Refresh and try again."; await RefreshAsync(); }
+        catch (ProjectsValidationException ex) { _error = string.Join(" ", ex.Errors.SelectMany(x => x.Value)); }
+        finally { _saving = false; }
+    }
+
+    private static IReadOnlyList<ProjectStatus> NextProjectStatuses(ProjectStatus status) => status switch { ProjectStatus.Planned => [ProjectStatus.Active, ProjectStatus.Cancelled], ProjectStatus.Active => [ProjectStatus.OnHold, ProjectStatus.Completed, ProjectStatus.Cancelled], ProjectStatus.OnHold => [ProjectStatus.Active, ProjectStatus.Cancelled], _ => [] };
+    private static string StatusAction(ProjectStatus status) => status switch { ProjectStatus.Active => "Start", ProjectStatus.OnHold => "Pause", ProjectStatus.Completed => "Complete", ProjectStatus.Cancelled => "Cancel", _ => status.ToString() };
+    private static string StatusLabel(ProjectStatus status) => status switch { ProjectStatus.Active => "In progress", ProjectStatus.OnHold => "On hold", _ => status.ToString() };
+    private static string StatusClass(ProjectStatus status) => status switch { ProjectStatus.Active => "is-success", ProjectStatus.Completed => "is-neutral", ProjectStatus.OnHold => "is-warning", ProjectStatus.Cancelled => "is-muted", _ => "is-planned" };
+    private sealed record ProjectStats(int TaskCount = 0, int CompletedTasks = 0, int OpenTasks = 0, int MilestoneCount = 0, decimal BillableHours = 0) { public int ProgressPercent => TaskCount == 0 ? 0 : (int)Math.Round(100m * CompletedTasks / TaskCount); }
+    private sealed class ProjectForm { [System.ComponentModel.DataAnnotations.Required, System.ComponentModel.DataAnnotations.StringLength(200)] public string Name { get; set; } = string.Empty; [System.ComponentModel.DataAnnotations.StringLength(4000)] public string? Description { get; set; } public ProjectStatus Status { get; set; } = ProjectStatus.Planned; public DateOnly? StartDate { get; set; } = DateOnly.FromDateTime(DateTime.Today); public DateOnly? EndDate { get; set; } }
+}
