@@ -12,7 +12,9 @@ public sealed class DashboardBrowserTests(ITestOutputHelper output)
         var baseUrl = Environment.GetEnvironmentVariable("ERP_E2E_BASE_URL");
         var email = Environment.GetEnvironmentVariable("ERP_E2E_EMAIL");
         var password = Environment.GetEnvironmentVariable("ERP_E2E_PASSWORD");
-        if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password)) return;
+        Assert.False(string.IsNullOrWhiteSpace(baseUrl), "Set ERP_E2E_BASE_URL to a disposable ERP test environment.");
+        Assert.False(string.IsNullOrWhiteSpace(email), "Set ERP_E2E_EMAIL to its dedicated test administrator.");
+        Assert.False(string.IsNullOrWhiteSpace(password), "Set ERP_E2E_PASSWORD to its dedicated test administrator password.");
 
         var applicationUri = new Uri(baseUrl);
         output.WriteLine("ERP_E2E_PHASE=playwright-create");

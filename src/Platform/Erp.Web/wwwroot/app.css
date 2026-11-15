@@ -903,3 +903,129 @@ button.menu-toggle:not(:disabled):hover {
     background-color: #f0f0f2;
     box-shadow: none;
 }
+
+/* Focused module workspace layouts */
+.module-workspace { display: grid; gap: 1.25rem; }
+.module-workspace .page-heading { margin-bottom: 0; }
+.module-workspace > section, .module-panel { min-width: 0; padding: clamp(1rem, 2vw, 1.45rem); border: 1px solid var(--line); border-radius: .9rem; background: var(--panel-strong); }
+.module-panel h2 { margin-top: 0; }
+.module-link-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); gap: 1rem; }
+.module-link-card { display: grid; align-content: start; justify-items: start; gap: .55rem; min-width: 0; padding: 1.25rem; border: 1px solid var(--line); border-radius: .9rem; color: inherit; background: var(--panel-strong); text-decoration: none; transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease; }
+.module-link-card:hover { border-color: var(--brand-strong); transform: translateY(-2px); box-shadow: var(--shadow); }
+.module-link-card h2, .module-link-card p { margin: 0; }
+.module-link-card p { min-height: 2.8em; }
+.project-detail-panel { display: grid; gap: 1rem; }
+.project-detail-panel > h3 { margin-bottom: 0; }
+.project-detail-panel > ul { padding-left: 1.25rem; }
+@media (max-width: 700px) {
+    .module-workspace .heading-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .module-workspace .heading-actions .button { justify-content: center; text-align: center; }
+    .module-link-grid { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { .module-link-card { transition: none; } }
+.module-menu { display: flex; flex-wrap: wrap; gap: .45rem; padding: .65rem; border: 1px solid var(--line); border-radius: .8rem; background: var(--panel-strong); }
+.module-menu a { display: inline-flex; align-items: center; min-height: 2.25rem; padding: .4rem .75rem; border-radius: .55rem; color: var(--text); font-size: .86rem; font-weight: 650; text-decoration: none; }
+.module-menu a:hover, .module-menu a:focus-visible { color: var(--brand-strong); background: var(--surface); outline-color: var(--brand-strong); }
+
+/* Project delivery workspace */
+.project-heading, .project-detail-heading, .manufacturing-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; }
+.project-heading h1, .manufacturing-heading h1 { margin-bottom: .35rem; }
+.project-metrics, .project-detail-metrics, .manufacturing-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .8rem; }
+.project-metric, .manufacturing-metric { display: grid; gap: .35rem; min-width: 0; padding: 1rem 1.1rem; border: 1px solid var(--line); border-radius: .8rem; background: white; text-decoration: none; }
+.project-metric > span, .manufacturing-metric > span { color: var(--muted); font-size: .76rem; font-weight: 650; }
+.project-metric strong, .manufacturing-metric strong { color: var(--text); font-size: 1.55rem; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.project-metric small, .manufacturing-metric small { color: var(--muted); font-size: .73rem; }
+.metric-date { font-size: 1.05rem !important; }
+.manufacturing-metric:hover { border-color: var(--brand-accent); box-shadow: var(--shadow); }
+.project-portfolio > .section-heading { align-items: end; }
+.project-filter { display: grid; grid-template-columns: auto minmax(12rem, 18rem); align-items: center; gap: .65rem; }
+.project-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); gap: .9rem; }
+.project-card { display: grid; align-content: start; min-width: 0; padding: 1.1rem; border: 1px solid var(--line); border-radius: .85rem; background: white; }
+.project-card-top, .project-progress-label, .project-card-meta, .project-card-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .55rem; }
+.project-card h3 { margin: .9rem 0 .35rem; font-size: 1.05rem; }
+.project-card h3 a { color: var(--text); text-decoration: none; }
+.project-card h3 a:hover { color: var(--brand-strong); text-decoration: underline; }
+.project-date, .project-card-description, .project-card-meta { color: var(--muted); font-size: .76rem; }
+.project-card-description { min-height: 2.8em; margin: 0 0 1rem; line-height: 1.5; }
+.project-progress-label { margin-bottom: .45rem; font-size: .76rem; }
+.project-progress { height: .45rem; overflow: hidden; border-radius: 999px; background: #e8edf5; }
+.project-progress > span { display: block; height: 100%; border-radius: inherit; background: var(--brand-strong); transition: width .2s ease; }
+.project-card-meta { justify-content: flex-start; gap: .4rem 1rem; margin-top: .65rem; }
+.project-card-actions { justify-content: flex-start; margin-top: 1rem; padding-top: .85rem; border-top: 1px solid var(--line); }
+.project-create-panel .form-actions { margin-top: .5rem; }
+.status-badge.is-warning { color: #775013; background: #fff1d6; }
+.status-badge.is-muted { color: #596579; background: #edf0f4; }
+.status-badge.is-planned { color: #4557a2; background: #e9edff; }
+.breadcrumb { display: flex; flex-wrap: wrap; gap: .5rem; color: var(--muted); font-size: .82rem; }
+.breadcrumb a, .text-link { color: var(--brand-strong); font-weight: 650; text-decoration: none; }
+.breadcrumb a:hover, .text-link:hover { text-decoration: underline; }
+.project-detail-heading { align-items: flex-start; padding: 1.25rem 0; }
+.project-detail-heading h1 { margin: .45rem 0; font-size: clamp(1.7rem, 3vw, 2.4rem); }
+.project-detail-heading p { max-width: 60rem; margin: 0; color: var(--muted); white-space: pre-wrap; }
+.project-detail-heading .project-card-actions { margin-top: .3rem; padding: 0; border: 0; }
+.project-work-grid { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.3fr); gap: 1rem; }
+.inline-create-grid { display: grid; grid-template-columns: minmax(12rem, 1fr) minmax(9rem, .55fr) auto; gap: .7rem; align-items: end; margin: 1rem 0; }
+.inline-create-grid button { min-height: 2.75rem; }
+.project-list { display: grid; }
+.project-list-row { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; min-width: 0; padding: .8rem .2rem; border-top: 1px solid var(--line); }
+.project-list-main { display: grid; flex: 1 1 8rem; min-width: 6rem; gap: .15rem; }
+.project-list-main > span, .table-subtitle { color: var(--muted); font-size: .74rem; }
+.milestone-marker { flex: 0 0 .65rem; width: .65rem; height: .65rem; border: 2px solid var(--brand-accent); border-radius: 50%; background: white; }
+.milestone-marker.is-success { border-color: var(--success); background: var(--success); }
+.milestone-marker.is-warning { border-color: #bd8618; background: #ffe7b3; }
+.compact-empty { padding: 1.25rem; }
+.project-task-table { margin-top: 1rem; }
+.project-task-table .table-subtitle { display: block; margin-top: .2rem; }
+.project-time-description { max-width: 48rem; margin-bottom: 1.25rem; }
+.time-create-grid { grid-template-columns: minmax(10rem, 1fr) repeat(2, minmax(7rem, .5fr)) minmax(8rem, .55fr) auto; }
+.manufacturing-work-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(17rem, .8fr); align-items: start; gap: 1rem; }
+.manufacturing-shortcuts { display: grid; gap: 1rem; }
+.manufacturing-shortcuts > .module-panel { display: grid; align-content: start; gap: .65rem; }
+.manufacturing-shortcuts h2 { margin-bottom: .2rem; }
+.manufacturing-shortcuts p { margin: 0; }
+.manufacturing-shortcuts .quick-action { min-height: 2.7rem; }
+.manufacturing-order-link { font-weight: 700; }
+.manufacturing-footnote { margin: 0; padding: .8rem 1rem; border-radius: .6rem; color: var(--muted); background: var(--panel-strong); font-size: .82rem; }
+.manufacturing-footnote a { color: var(--brand-strong); font-weight: 650; }
+.project-portfolio-page .status-badge, .project-detail-page .status-badge { white-space: nowrap; }
+@media (max-width: 900px) {
+    .project-metrics, .project-detail-metrics, .manufacturing-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .project-work-grid, .manufacturing-work-grid { grid-template-columns: 1fr; }
+    .manufacturing-shortcuts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+    .project-filter { width: 100%; grid-template-columns: 1fr; }
+    .manufacturing-shortcuts { grid-template-columns: 1fr; }
+    .inline-create-grid, .time-create-grid { grid-template-columns: 1fr 1fr; }
+    .inline-create-grid button { grid-column: 1 / -1; }
+}
+
+/* Shared, restrained register styling for operational workspaces. */
+.register-tabs { display: flex; flex-wrap: wrap; gap: .35rem; margin: .25rem 0 1.1rem; padding-bottom: .65rem; border-bottom: 1px solid var(--line); }
+.register-tabs a { padding: .5rem .8rem; border-radius: 999px; color: var(--muted); font-size: .86rem; font-weight: 650; text-decoration: none; }
+.register-tabs a:hover, .register-tabs a.is-current { color: var(--text); background: #f0f2f5; }
+.master-data-import { margin-block: .8rem 1.2rem; }
+.master-data-import .form-grid { align-items: end; }
+.master-data-import details { margin-top: .65rem; color: var(--danger, #a33); }
+.file-picker { display: flex; align-items: center; gap: .9rem; min-height: 4.5rem; padding: .8rem 1rem; border: 1px dashed var(--line); border-radius: .75rem; background: var(--panel-strong); cursor: pointer; transition: border-color .15s ease, background .15s ease; }
+.file-picker:hover, .file-picker:focus-within { border-color: var(--accent, #6868a8); background: #f8f8fc; }
+.file-picker input[type="file"] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
+.file-picker-mark { display: grid; width: 2.5rem; height: 2.5rem; flex: 0 0 auto; place-items: center; border-radius: .65rem; background: #f0f0f5; color: var(--text); font-size: 1.2rem; }
+.file-picker-copy { display: grid; min-width: 0; gap: .2rem; }
+.file-picker-copy strong { color: var(--text); font-size: .9rem; }
+.file-picker-copy span { overflow: hidden; color: var(--muted); font-size: .78rem; text-overflow: ellipsis; white-space: nowrap; }
+.file-picker-action { margin-left: auto; flex: 0 0 auto; color: var(--text); font-size: .82rem; font-weight: 650; }
+.entity-page .data-table td.numeric, .entity-page .data-table th.numeric { text-align: right; font-variant-numeric: tabular-nums; }
+.entity-page .list-meta { display: flex; justify-content: space-between; gap: .75rem; margin: .8rem 0; color: var(--muted); font-size: .84rem; }
+/* Master data, purchasing and inventory use the shared monochrome register language. */
+.register-tabs a:hover, .register-tabs a.is-current { background: #f0f0f2; }
+.master-data-page .module-panel { border-color: #e3e3e8; }
+.module-workspace .section-heading { align-items: end; }
+.module-workspace .data-table tbody tr:hover { background: #fafafd; }
+.module-workspace .pager { display: flex; align-items: center; gap: .6rem; }
+.module-workspace .status-badge { border-radius: 999px; }
+@media (max-width: 680px) {
+    .master-data-page .page-heading, .module-workspace .page-heading { align-items: stretch; }
+    .master-data-page .heading-actions { display: grid; grid-template-columns: 1fr; }
+    .module-workspace .filter-bar { grid-template-columns: 1fr; }
+}

@@ -17,6 +17,12 @@ using Erp.Modules.Inventory.Contracts;
 using Erp.Modules.Accounting;
 using Erp.Modules.Accounting.Contracts;
 using Erp.Modules.Reporting;
+using Erp.Modules.Hcm;
+using Erp.Modules.Hcm.Contracts;
+using Erp.Modules.Manufacturing;
+using Erp.Modules.Manufacturing.Contracts;
+using Erp.Modules.Projects;
+using Erp.Modules.Projects.Contracts;
 
 namespace Erp.ArchitectureTests;
 
@@ -164,6 +170,57 @@ public sealed class DependencyBoundaryTests
         Assert.DoesNotContain("Microsoft.EntityFrameworkCore", references);
         Assert.DoesNotContain("Npgsql.EntityFrameworkCore.PostgreSQL", references);
         Assert.DoesNotContain("Erp.Modules.Accounting", references);
+    }
+
+    [Fact]
+    public void HcmUsesItsPublicContractAndHcmContractsExposeNoPersistence()
+    {
+        var references = typeof(HcmModule).Assembly.GetReferencedAssemblies().Select(x => x.Name).ToHashSet();
+        Assert.Contains("Erp.Abstractions", references);
+        Assert.Contains("Erp.Modules.Hcm.Contracts", references);
+        Assert.DoesNotContain("Erp.Infrastructure", references);
+        Assert.DoesNotContain("Erp.ModuleSystem", references);
+        Assert.DoesNotContain("Erp.Core", references);
+
+        var contractReferences = typeof(IHcmService).Assembly.GetReferencedAssemblies().Select(x => x.Name).ToHashSet();
+        Assert.DoesNotContain("Erp.Abstractions", contractReferences);
+        Assert.DoesNotContain("Microsoft.EntityFrameworkCore", contractReferences);
+        Assert.DoesNotContain("Npgsql.EntityFrameworkCore.PostgreSQL", contractReferences);
+        Assert.DoesNotContain("Erp.Modules.Hcm", contractReferences);
+    }
+
+    [Fact]
+    public void ManufacturingUsesPublicProductContractAndManufacturingContractsExposeNoPersistence()
+    {
+        var references = typeof(ManufacturingModule).Assembly.GetReferencedAssemblies().Select(x => x.Name).ToHashSet();
+        Assert.Contains("Erp.Abstractions", references);
+        Assert.Contains("Erp.Modules.Manufacturing.Contracts", references);
+        Assert.Contains("Erp.Modules.Products.Contracts", references);
+        Assert.DoesNotContain("Erp.Modules.Products", references);
+        Assert.DoesNotContain("Erp.Infrastructure", references);
+
+        var contractReferences = typeof(IManufacturingService).Assembly.GetReferencedAssemblies().Select(x => x.Name).ToHashSet();
+        Assert.DoesNotContain("Erp.Abstractions", contractReferences);
+        Assert.DoesNotContain("Microsoft.EntityFrameworkCore", contractReferences);
+        Assert.DoesNotContain("Npgsql.EntityFrameworkCore.PostgreSQL", contractReferences);
+        Assert.DoesNotContain("Erp.Modules.Manufacturing", contractReferences);
+    }
+
+    [Fact]
+    public void ProjectsContractsExposeNoPersistenceDependencies()
+    {
+        var references = typeof(ProjectsModule).Assembly.GetReferencedAssemblies().Select(x => x.Name).ToHashSet();
+        Assert.Contains("Erp.Abstractions", references);
+        Assert.Contains("Erp.Modules.Projects.Contracts", references);
+        Assert.DoesNotContain("Erp.Infrastructure", references);
+        Assert.DoesNotContain("Erp.ModuleSystem", references);
+        Assert.DoesNotContain("Erp.Core", references);
+
+        var contractReferences = typeof(IProjectsService).Assembly.GetReferencedAssemblies().Select(x => x.Name).ToHashSet();
+        Assert.DoesNotContain("Erp.Abstractions", contractReferences);
+        Assert.DoesNotContain("Microsoft.EntityFrameworkCore", contractReferences);
+        Assert.DoesNotContain("Npgsql.EntityFrameworkCore.PostgreSQL", contractReferences);
+        Assert.DoesNotContain("Erp.Modules.Projects", contractReferences);
     }
 
     [Fact]

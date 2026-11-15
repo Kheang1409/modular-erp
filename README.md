@@ -43,9 +43,12 @@ Useful local endpoints:
 | Products | Reusable products, services, categories, and units | [Products](docs/modules/products.md) |
 | CRM | Leads, opportunities, and sales pipeline | [CRM](docs/modules/crm.md) |
 | Sales | Quotations and sales orders | [Sales](docs/modules/sales.md) |
-| Purchasing | Purchase orders and receiving workflows | [Purchasing](docs/modules/purchasing.md) |
+| Purchasing | Purchase orders, supplier contracts, and supplier performance evaluation | [Purchasing](docs/modules/purchasing.md) |
 | Inventory | Warehouses, locations, movements, balances, and reservations | [Inventory](docs/modules/inventory.md) |
-| Accounting | Double-entry ledger, invoices, bills, payments, fiscal controls, and reconciliation | [Accounting](docs/modules/accounting.md) |
+| Accounting | Double-entry ledger, invoices, bills, payments, budgets, fiscal controls, and reconciliation | [Accounting](docs/modules/accounting.md) |
+| HCM | Employee records, leave, attendance, benefits, training, and performance reviews | [HCM](docs/modules/hcm.md) |
+| Manufacturing | Bills of materials, work orders, status history, and quality inspections | [Manufacturing](docs/modules/manufacturing.md) |
+| Projects | Projects, milestones, tasks, and billable-time capture | [Projects](docs/modules/projects.md) |
 | Reporting | Sales, purchasing, inventory, financial statements, aging, cash, and CSV exports | [Reporting](docs/modules/reporting.md) |
 
 Modules own their persistence and communicate through public contracts. The
@@ -112,7 +115,26 @@ The storage fixture builds MinIO from a fixed upstream source revision using pin
 dotnet test tests/IntegrationTests/Erp.IntegrationTests.csproj --no-build
 ```
 
-Browser tests require a running application, Chromium, and all three `ERP_E2E_*` settings. They return early if settings are missing, so an unconfigured green test run is not browser verification. After building, install Chromium and supply credentials for a dedicated test administrator:
+Browser tests require a running application, Chromium, and all three `ERP_E2E_*` settings. Missing settings fail the tests with a message naming the required value; a green browser run therefore cannot silently mean that browser verification was skipped. The critical workflow signs in as the supplied dedicated test administrator and creates uniquely named synthetic records in the active company. It creates a product and contacts, then exercises CRM, quotations and sales orders, purchasing, inventory movements, accounting invoices, bills, payments and journals, and populated reporting including CSV and paging checks. It also checks multi-company isolation, critical routes, responsive layouts, and accessibility. The workflows do not load a canned dataset or use real customer data. Run them only against a disposable test environment because they create business and administrative records.
+
+The CI browser job is the complete isolated example: it supplies test-only credentials, starts a fresh Compose database and application, waits for readiness, then runs the browser suite. To run the same approach locally, use a dedicated Compose project name and throwaway `.env` credentials, and keep its volumes separate from your development project:
+
+```powershell
+$env:COMPOSE_PROJECT_NAME = "erp-e2e-local"
+$env:ERP_PORT = "18080"
+$env:POSTGRES_PORT = "55432"
+$env:ERP_ADMIN_EMAIL = "e2e@example.test"
+$env:ERP_ADMIN_PASSWORD = "E2e-Only-Password-Change-This!"
+$env:ERP_E2E_BASE_URL = "http://localhost:18080"
+$env:ERP_E2E_EMAIL = $env:ERP_ADMIN_EMAIL
+$env:ERP_E2E_PASSWORD = $env:ERP_ADMIN_PASSWORD
+docker compose up -d --build --wait
+dotnet build tests/EndToEndTests/Erp.EndToEndTests.csproj
+pwsh tests/EndToEndTests/bin/Debug/net10.0/playwright.ps1 install chromium
+dotnet test tests/EndToEndTests/Erp.EndToEndTests.csproj --no-build
+```
+
+When finished, remove only that dedicated project's containers and volumes with `docker compose down -v`, then clear the process-local settings. This deletes that test database and its generated data. Do not run the cleanup command with your normal development Compose project name. The test workflow validates existing capabilities; it does not imply that every module has browser coverage (HCM, Manufacturing, Projects, and supplier sourcing currently rely on their module and PostgreSQL tests).
 
 ```powershell
 pwsh tests/EndToEndTests/bin/Debug/net10.0/playwright.ps1 install chromium

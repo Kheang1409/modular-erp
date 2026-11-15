@@ -36,6 +36,9 @@
     <ProjectReference Include="..\..\src\Modules\Accounting\Erp.Modules.Accounting.csproj" />
     <ProjectReference Include="..\..\src\Modules\Accounting.Contracts\Erp.Modules.Accounting.Contracts.csproj" />
     <ProjectReference Include="..\..\src\Modules\Reporting\Erp.Modules.Reporting.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Hcm\Erp.Modules.Hcm.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Manufacturing\Erp.Modules.Manufacturing.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Projects\Erp.Modules.Projects.csproj" />
   </ItemGroup>
 
   <ItemGroup>

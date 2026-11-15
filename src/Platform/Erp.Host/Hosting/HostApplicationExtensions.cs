@@ -14,6 +14,9 @@ using Erp.Modules.Purchasing;
 using Erp.Modules.Inventory;
 using Erp.Modules.Accounting;
 using Erp.Modules.Reporting;
+using Erp.Modules.Hcm;
+using Erp.Modules.Manufacturing;
+using Erp.Modules.Projects;
 using Erp.Web;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Diagnostics;
@@ -85,7 +88,7 @@ public static class HostApplicationExtensions
 
         var modules = builder.Services.AddErpModules(
             builder.Configuration, typeof(SampleModule).Assembly, typeof(ContactsModule).Assembly,
-            typeof(ProductsModule).Assembly, typeof(CrmModule).Assembly, typeof(SalesModule).Assembly, typeof(PurchasingModule).Assembly, typeof(InventoryModule).Assembly, typeof(AccountingModule).Assembly, typeof(ReportingModule).Assembly);
+            typeof(ProductsModule).Assembly, typeof(CrmModule).Assembly, typeof(SalesModule).Assembly, typeof(PurchasingModule).Assembly, typeof(InventoryModule).Assembly, typeof(AccountingModule).Assembly, typeof(ReportingModule).Assembly, typeof(HcmModule).Assembly, typeof(ManufacturingModule).Assembly, typeof(ProjectsModule).Assembly);
         modules.Permissions.Add(new(PlatformPermissions.OrganizationRead, "View organization context", "erp.platform"));
         modules.Permissions.Add(new(PlatformPermissions.OrganizationManage, "Create and manage companies", "erp.platform"));
         modules.Permissions.Add(new(PlatformPermissions.SecurityManage, "Manage roles and permissions", "erp.platform"));

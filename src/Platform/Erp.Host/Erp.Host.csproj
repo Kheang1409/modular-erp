@@ -15,6 +15,9 @@
     <ProjectReference Include="..\..\Modules\Sales\Erp.Modules.Sales.csproj" />
     <ProjectReference Include="..\..\Modules\Purchasing\Erp.Modules.Purchasing.csproj" />
     <ProjectReference Include="..\..\Modules\Inventory\Erp.Modules.Inventory.csproj" />
+    <ProjectReference Include="..\..\Modules\Hcm\Erp.Modules.Hcm.csproj" />
+    <ProjectReference Include="..\..\Modules\Manufacturing\Erp.Modules.Manufacturing.csproj" />
+    <ProjectReference Include="..\..\Modules\Projects\Erp.Modules.Projects.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.App.Internal.Assets" Version="10.0.12" PrivateAssets="all" />

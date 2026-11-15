@@ -30,6 +30,13 @@ depend on module persistence (see `DependencyBoundaryTests`). When changing
 module interactions, keep shared types in the owning contract project and avoid
 cross-module references to implementation projects or database schemas.
 
+The built-in HCM, Manufacturing, and Projects domains use the same boundary:
+each has a sibling public contracts project and owns its schema. Manufacturing
+references Products through `Products.Contracts`; HCM and Projects have no
+business-module implementation dependency. Their HTTP APIs are composed by the
+host like the existing modules, and endpoint permissions remain the server-side
+authorization boundary.
+
 The built-in SampleModule remains a compile-time reference, while trusted external modules can be discovered from configured folders at startup. The module system provides strict JSON manifest parsing, SHA-256 inventory verification, assembly/manifest consistency checks, semantic-version/platform checks, dependency-range validation, circular-dependency detection, topological ordering, and permission-manifest consistency. Loading requires restart and is not a security sandbox. See the [module SDK guide](../modules/module-sdk.md).
 
 `Erp.Host/Program.cs` is intentionally limited to composition flow. Host service and middleware setup, account endpoints, platform endpoints, and database/bootstrap initialization live in focused files; this keeps the executable boundary explicit without moving host concerns into business modules.

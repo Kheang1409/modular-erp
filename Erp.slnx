@@ -31,6 +31,12 @@
     <Project Path="src/Modules/Inventory.Contracts/Erp.Modules.Inventory.Contracts.csproj" />
     <Project Path="src/Modules/Sales/Erp.Modules.Sales.csproj" />
     <Project Path="src/Modules/Sales.Contracts/Erp.Modules.Sales.Contracts.csproj" />
+    <Project Path="src/Modules/Hcm/Erp.Modules.Hcm.csproj" />
+    <Project Path="src/Modules/Hcm.Contracts/Erp.Modules.Hcm.Contracts.csproj" />
+    <Project Path="src/Modules/Manufacturing/Erp.Modules.Manufacturing.csproj" />
+    <Project Path="src/Modules/Manufacturing.Contracts/Erp.Modules.Manufacturing.Contracts.csproj" />
+    <Project Path="src/Modules/Projects/Erp.Modules.Projects.csproj" />
+    <Project Path="src/Modules/Projects.Contracts/Erp.Modules.Projects.Contracts.csproj" />
   </Folder>
   <Folder Name="/src/Shared/">
     <Project Path="src/Shared/Erp.SharedKernel/Erp.SharedKernel.csproj" />
@@ -50,5 +56,8 @@
   </Folder>
   <Folder Name="/tests/UnitTests/">
     <Project Path="tests/UnitTests/Erp.UnitTests.csproj" />
+  </Folder>
+  <Folder Name="/tests/HcmUnitTests/">
+    <Project Path="tests/HcmUnitTests/Erp.Hcm.UnitTests.csproj" />
   </Folder>
 </Solution>
