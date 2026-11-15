@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Modules\Accounting\Erp.Modules.Accounting.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Hcm\Erp.Modules.Hcm.csproj" />
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
@@ -28,6 +29,8 @@
     <ProjectReference Include="..\..\src\Modules\Purchasing\Erp.Modules.Purchasing.csproj" />
     <ProjectReference Include="..\..\src\Modules\Inventory\Erp.Modules.Inventory.csproj" />
     <ProjectReference Include="..\..\src\Modules\Reporting\Erp.Modules.Reporting.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Projects\Erp.Modules.Projects.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Manufacturing\Erp.Modules.Manufacturing.csproj" />
   </ItemGroup>
 
   <ItemGroup>
