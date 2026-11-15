@@ -1,0 +1,166 @@
+@page "/hcm/people"
+@using System.Net.Http.Json
+@using Erp.Modules.Hcm
+@using Erp.Modules.Hcm.Contracts
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@attribute [Authorize(Policy = HcmPermissions.Read)]
+@inject IHcmService Hcm
+@inject HttpClient Http
+
+<PageTitle>Employees</PageTitle>
+<article class="card entity-page">
+    <div class="page-heading">
+<div>
+            <p class="eyebrow">People</p>
+            <h1>Employees</h1>
+            <p class="muted">Manage employee records and employment status here.</p>
+        </div></div>
+    @if (_error is not null) { <div class="notice notice-error" role="alert">@_error</div> }
+    <AuthorizeView Policy="@HcmPermissions.Manage">
+        <section class="module-panel master-data-import" aria-labelledby="employee-import-heading">
+            <div class="section-heading"><div><p class="eyebrow">CSV tools</p><h2 id="employee-import-heading">Import employees</h2><p class="muted">Columns: employeeNumber, fullName, email, hireDate. Dates use YYYY-MM-DD.</p></div><a class="button button-secondary" href="/api/v1/hcm/employees/template">Download CSV template</a></div>
+            <div class="form-grid"><label class="file-picker"><span class="file-picker-mark" aria-hidden="true">↑</span><span class="file-picker-copy"><strong>@(_file is null ? "Choose an employee CSV file" : _file.Name)</strong><span>@(_file is null ? "CSV format, up to 5 MB" : $"{(_file.Size / 1024d):N0} KB · ready to import")</span></span><span class="file-picker-action">Browse files</span><InputFile OnChange="SelectFile" accept=".csv,text/csv" /></label><button type="button" disabled="@(_importing || _file is null)" @onclick="ImportAsync">@(_importing ? "Importing…" : "Import CSV")</button></div>
+            @if (_importSummary is not null) { <p class="notice notice-success" role="status">@_importSummary</p> }@if (_importErrors.Count > 0) { <details><summary>@_importErrors.Count row issue(s)</summary><ul>@foreach (var issue in _importErrors) { <li>@issue</li> }</ul></details>}
+        </section>
+    </AuthorizeView>
+
+    <AuthorizeView Context="auth0" Policy="@HcmPermissions.Manage">
+        <Authorized Context="authorizationContext">
+            <EditForm Model="_draft" OnValidSubmit="CreateAsync" FormName="hcm-employee-create">
+                <div class="form-grid">
+                    <label><span>Employee number</span><InputText @bind-Value="_draft.EmployeeNumber" /></label>
+                    <label><span>Full name</span><InputText @bind-Value="_draft.FullName" /></label>
+                    <label><span>Email (optional)</span><InputText @bind-Value="_draft.Email" /></label>
+                    <label><span>Hire date</span><InputDate @bind-Value="_draft.HireDate" /></label>
+                </div>
+                <button type="submit">Add employee</button>
+            </EditForm>
+        </Authorized>
+    </AuthorizeView>
+
+    @if (_employees is null)
+    {
+        <div class="loading-state" role="status">Loading employeesâ€¦</div>
+    }
+    else if (_employees.Count == 0)
+    {
+        <div class="empty-state"><h2>No employees yet</h2><p>Create the first employee record to get started.</p></div>
+    }
+    else
+    {
+        <div class="table-scroll" tabindex="0">
+            <table class="data-table">
+                <thead><tr><th scope="col">Employee</th><th scope="col">Employee number</th><th scope="col">Hire date</th><th scope="col">Status</th><th scope="col">Employment</th></tr></thead>
+                <tbody>
+                    @foreach (var employee in _employees)
+                    {
+                        <tr>
+                            <td data-label="Employee"><strong>@employee.FullName</strong><span>@employee.Email</span></td>
+                            <td data-label="Employee number">@employee.EmployeeNumber</td>
+                            <td data-label="Hire date">@employee.HireDate.ToString("yyyy-MM-dd")</td>
+                            <td data-label="Status">@employee.Status</td>
+                            <td data-label="Employment"><AuthorizeView Context="auth0" Policy="@HcmPermissions.Manage" Context="employeeManage">
+                                <button type="button" class="button-secondary" disabled="@_saving" @onclick="() => SetStatusAsync(employee, employee.Status == EmployeeStatus.Active ? EmployeeStatus.Inactive : EmployeeStatus.Active)">
+                                    @(employee.Status == EmployeeStatus.Active ? "Deactivate" : "Reactivate")
+                                </button>
+                            </AuthorizeView></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</article>
+
+@code {
+    private IReadOnlyList<EmployeeDto>? _employees;
+    private readonly EmployeeDraft _draft = new();
+    private string? _error;
+    private bool _saving;
+    private IBrowserFile? _file;
+    private bool _importing;
+    private string? _importSummary;
+    private readonly List<string> _importErrors = [];
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try { _employees = await Hcm.ListEmployeesAsync(null, CancellationToken.None); }
+        catch (Exception exception) { _error = exception.Message; }
+    }
+
+    private void SelectFile(InputFileChangeEventArgs args) { _file = args.File; _importSummary = null; _importErrors.Clear(); }
+
+    private async Task ImportAsync()
+    {
+        if (_file is null || _importing) return;
+        _importing = true; _error = _importSummary = null; _importErrors.Clear();
+        try
+        {
+            await using var stream = _file.OpenReadStream(5_000_000);
+            using var content = new MultipartFormDataContent(); using var file = new StreamContent(stream);
+            file.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/csv"); content.Add(file, "file", _file.Name);
+            using var response = await Http.PostAsync("api/v1/hcm/employees/import", content);
+            var result = await response.Content.ReadFromJsonAsync<ImportResult>();
+            if (!response.IsSuccessStatusCode) throw new InvalidOperationException(result?.Errors.FirstOrDefault() ?? "Employee import failed.");
+            _importSummary = $"Imported {result?.ImportedCount ?? 0} employee(s)."; _importErrors.AddRange(result?.Errors ?? []); _file = null; await LoadAsync();
+        }
+        catch (Exception exception) { _error = exception.Message; }
+        finally { _importing = false; }
+    }
+
+    private sealed record ImportResult(int ImportedCount, IReadOnlyList<string> Errors);
+    private async Task CreateAsync()
+    {
+        _error = null;
+        _saving = true;
+        try
+        {
+            await Hcm.CreateEmployeeAsync(
+                new(_draft.EmployeeNumber, _draft.FullName, _draft.Email, _draft.HireDate),
+                CancellationToken.None);
+            _draft.EmployeeNumber = _draft.FullName = _draft.Email = string.Empty;
+            _draft.HireDate = DateOnly.FromDateTime(DateTime.Today);
+            await LoadAsync();
+        }
+        catch (HcmValidationException exception)
+        {
+            _error = string.Join(" ", exception.Errors.Values.SelectMany(messages => messages));
+        }
+        catch (HcmConflictException exception) { _error = exception.Message; }
+        finally { _saving = false; }
+    }
+
+    private async Task SetStatusAsync(EmployeeDto employee, EmployeeStatus status)
+    {
+        _error = null;
+        _saving = true;
+        try
+        {
+            await Hcm.UpdateEmployeeAsync(employee.Id,
+                new(employee.FullName, employee.Email, employee.HireDate, status), CancellationToken.None);
+            await LoadAsync();
+        }
+        catch (HcmValidationException exception) { _error = string.Join(" ", exception.Errors.Values.SelectMany(messages => messages)); }
+        catch (HcmConcurrencyException exception) { _error = exception.Message; }
+        finally { _saving = false; }
+    }
+
+    private sealed class EmployeeDraft
+    {
+        public string? EmployeeNumber { get; set; }
+        public string? FullName { get; set; }
+        public string? Email { get; set; }
+        public DateOnly HireDate { get; set; } = DateOnly.FromDateTime(DateTime.Today);
+    }
+}
+
+
+
+
+
+
