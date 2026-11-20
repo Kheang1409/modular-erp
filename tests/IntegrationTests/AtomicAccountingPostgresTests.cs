@@ -216,7 +216,6 @@ public sealed class AtomicAccountingPostgresTests(AtomicAccountingPostgresFixtur
 
     [Theory]
     [InlineData("entry-line")]
-    [InlineData("reversal-description")]
     [InlineData("reversal-prefixed-key")]
     [InlineData("reconciliation-amount")]
     public async Task ActualSqlFailuresRollBackHeadersChildrenGeneratedNumbersAndPermitValidRetry(string invalid)
@@ -230,7 +229,6 @@ public sealed class AtomicAccountingPostgresTests(AtomicAccountingPostgresFixtur
                 Lines =
                 [new(scope.Bank.Id, valid ? "Debit" : new string('x', 501), 20, 0), new(scope.Revenue.Id, "Credit", 0, 20)]
             }, CancellationToken.None)),
-            "reversal-description" => Box(scope.Ledger.ReverseAsync(scope.PostedEntry.Id, new(BusinessDate, valid ? "Reversal" : new string('x', 501), "reverse"), CancellationToken.None)),
             "reversal-prefixed-key" => Box(scope.Ledger.ReverseAsync(scope.PostedEntry.Id, new(BusinessDate, "Reversal", valid ? "reverse" : new string('k', 100)), CancellationToken.None)),
             _ => Box(scope.Controls.CreateReconciliationAsync(new(scope.Bank.Id, BusinessDate, valid ? 0 : decimal.MaxValue,
                 valid ? 20 : decimal.MaxValue, [scope.PostedEntry.Id]), CancellationToken.None))
@@ -246,6 +244,29 @@ public sealed class AtomicAccountingPostgresTests(AtomicAccountingPostgresFixtur
         Assert.Empty(scope.Outbox.Attempts);
         await AssertDurableResult(scope, await Execute(true));
         await AssertPlatformCounts(scope, 1, invalid.StartsWith("reversal", StringComparison.Ordinal) ? 1 : 0);
+    }
+
+    [Fact]
+    public async Task OverlongReversalDescriptionIsRejectedBeforePersistenceAndAllowsValidRetry()
+    {
+        await using var scope = await TestScope.CreateAsync(fixture.ConnectionString);
+        var original = await Snapshot(scope);
+
+        var failure = await Assert.ThrowsAsync<AccountingValidationException>(() => scope.Ledger.ReverseAsync(
+            scope.PostedEntry.Id, new(BusinessDate, new string('x', 501), "reverse"), CancellationToken.None));
+
+        Assert.Contains("description", failure.Errors.Keys);
+        Assert.Equal(original, await Snapshot(scope));
+        AssertClean(scope);
+        Assert.Equal(0, scope.Audit.FlushCalls);
+        Assert.Empty(scope.Outbox.Attempts);
+        await AssertPlatformCounts(scope, 0, 0);
+
+        var reversal = await scope.Ledger.ReverseAsync(
+            scope.PostedEntry.Id, new(BusinessDate, "Reversal", "reverse"), CancellationToken.None);
+
+        await AssertDurableResult(scope, reversal);
+        await AssertPlatformCounts(scope, 1, 1);
     }
 
     [Theory]
