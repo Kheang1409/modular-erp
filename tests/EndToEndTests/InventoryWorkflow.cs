@@ -33,7 +33,7 @@ internal static partial class InventoryWorkflow
         });
         Assert.True(tracked.Ok, $"Inventory product setup returned HTTP {tracked.Status}.");
         var suffix = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
-        var warehouse = await PostAsync(page, baseUrl, "/api/v1/inventory/warehouses", new { code = $"E2E-{suffix}", name = $"Browser warehouse {suffix}" });
+        var warehouse = await PostAsync(page, baseUrl, "/api/v1/inventory/warehouses", new { code = $"QA-2026-{suffix}", name = $"QA-2026-Browser warehouse {suffix}" });
         var warehouseId = warehouse.GetProperty("id").GetGuid();
         var locations = new Dictionary<string, Guid>();
         foreach (var location in new[] { (Name: "A", Type: 0), (Name: "B", Type: 0), (Name: "SUPPLIER", Type: 1), (Name: "CUSTOMER", Type: 2), (Name: "LOSS", Type: 3), (Name: "GAIN", Type: 4) })
@@ -42,7 +42,7 @@ internal static partial class InventoryWorkflow
             {
                 warehouseId = location.Type == 0 ? (Guid?)warehouseId : null,
                 code = $"{location.Name}-{suffix}",
-                name = $"Browser {location.Name} {suffix}",
+                name = $"QA-2026-Browser {location.Name} {suffix}",
                 type = location.Type
             });
             locations[location.Name] = result.GetProperty("id").GetGuid();
@@ -212,8 +212,8 @@ internal static partial class InventoryWorkflow
         var secondProduct = await PostAsync(page, baseUrl, "/api/v1/products/", new
         {
             type = 0,
-            sku = $"E2E-BATCH-{suffix}",
-            name = $"Browser batch product {suffix}",
+            sku = $"QA-2026-BATCH-{suffix}",
+            name = $"QA-2026-Browser batch product {suffix}",
             salePrice = 0,
             cost = 0,
             currencyCode = product.GetProperty("currencyCode").GetString(),
@@ -222,7 +222,7 @@ internal static partial class InventoryWorkflow
             tracksInventory = true
         });
         var secondId = secondProduct.GetProperty("id").GetGuid();
-        var notes = $"Browser draft batch {suffix}";
+        var notes = $"QA-2026-Browser draft batch {suffix}";
         await VisitAsync(page, baseUrl, "/inventory/moves/batch/new", "New movement batch");
         await page.GetByRole(AriaRole.Combobox, new() { Name = "Movement type", Exact = true }).SelectOptionAsync("Receipt");
         await page.GetByLabel("Business date", new() { Exact = true }).FillAsync(date);
@@ -289,7 +289,7 @@ internal static partial class InventoryWorkflow
 
     private static async Task<(JsonElement Purchase, JsonElement Sales)> CreateSourceDocumentsAsync(IPage page, string baseUrl, JsonElement product, string suffix, string date)
     {
-        var contact = await PostAsync(page, baseUrl, "/api/v1/contacts/", new { kind = 1, displayName = $"Browser inventory party {suffix}", organizationName = $"Browser inventory party {suffix}", isCustomer = true, isSupplier = true, taxNumber = $"INV-{suffix}", billingAddress = new { line1 = "40 Inventory Street", city = "Test City", countryCode = "US" }, shippingAddress = new { line1 = "50 Inventory Avenue", city = "Test City", countryCode = "US" } });
+        var contact = await PostAsync(page, baseUrl, "/api/v1/contacts/", new { kind = 1, displayName = $"QA-2026-Browser inventory party {suffix}", organizationName = $"QA-2026-Browser inventory party {suffix}", isCustomer = true, isSupplier = true, taxNumber = $"QA-2026-INV-{suffix}", billingAddress = new { line1 = "40 Inventory Street", city = "Test City", countryCode = "US" }, shippingAddress = new { line1 = "50 Inventory Avenue", city = "Test City", countryCode = "US" } });
         var contactId = contact.GetProperty("id").GetGuid();
         var productId = product.GetProperty("id").GetGuid();
         var currencyCode = product.GetProperty("currencyCode").GetString();

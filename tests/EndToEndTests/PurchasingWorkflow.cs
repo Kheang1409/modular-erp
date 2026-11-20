@@ -15,8 +15,8 @@ internal static partial class PurchasingWorkflow
         var productId = product.GetProperty("id").GetGuid();
         var currency = product.GetProperty("currencyCode").GetString()!;
         var suffix = Guid.NewGuid().ToString("N")[..8];
-        var supplierName = $"Browser purchasing supplier {suffix}";
-        var taxNumber = $"SUPPLIER-{suffix}";
+        var supplierName = $"QA-2026-Browser purchasing supplier {suffix}";
+        var taxNumber = $"QA-2026-SUPPLIER-{suffix}";
         var supplier = await PostAsync(page, baseUrl, "/api/v1/contacts/", new
         {
             kind = 1,
@@ -36,7 +36,7 @@ internal static partial class PurchasingWorkflow
         await page.GetByLabel("Currency", new() { Exact = true }).FillAsync(currency);
         await page.GetByLabel("Order date", new() { Exact = true }).FillAsync(date);
         await page.GetByLabel("Expected delivery", new() { Exact = true }).FillAsync(delivery);
-        await FillLineAsync(page.Locator("main fieldset").First, productId, "2", "12.5", "10", "5", $"Browser purchase line {suffix}");
+        await FillLineAsync(page.Locator("main fieldset").First, productId, "2", "12.5", "10", "5", $"QA-2026-Browser purchase line {suffix}");
         await page.GetByRole(AriaRole.Button, new() { Name = "Add line", Exact = true }).ClickAsync();
         await FillLineAsync(page.Locator("main fieldset").Nth(1), productId, "1", "7", "0", "0", $"Additional purchase line {suffix}");
         await SaveAsync(page);
@@ -52,7 +52,7 @@ internal static partial class PurchasingWorkflow
         await ExpectDocumentAsync(page, number, "Draft");
 
         await EditAsync(page);
-        await page.GetByLabel("Notes", new() { Exact = true }).FillAsync($"Updated browser purchase order {suffix}");
+        await page.GetByLabel("Notes", new() { Exact = true }).FillAsync($"QA-2026-Updated browser purchase order {suffix}");
         await page.Locator("main fieldset").First.GetByLabel("Quantity", new() { Exact = true }).FillAsync("3");
         await page.GetByRole(AriaRole.Button, new() { Name = "Add line", Exact = true }).ClickAsync();
         await FillLineAsync(page.Locator("main fieldset").Nth(2), productId, "2", "4.25", "20", "10", $"Third purchase line {suffix}");

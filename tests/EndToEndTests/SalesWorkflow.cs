@@ -14,7 +14,7 @@ internal static partial class SalesWorkflow
         var product = products.GetProperty("items").EnumerateArray().Single(item => item.GetProperty("sku").GetString() == productSku);
         var productId = product.GetProperty("id").GetGuid();
         var suffix = Guid.NewGuid().ToString("N")[..8];
-        var customerName = $"Browser sales customer {suffix}";
+        var customerName = $"QA-2026-Browser sales customer {suffix}";
         var taxNumber = $"TEST-{suffix}";
         var customer = await PostAsync(page, baseUrl, "/api/v1/contacts/", new
         {
@@ -34,7 +34,7 @@ internal static partial class SalesWorkflow
         await page.GetByLabel("Customer ID", new() { Exact = true }).FillAsync(customerId.ToString());
         await page.GetByLabel("Currency", new() { Exact = true }).FillAsync(product.GetProperty("currencyCode").GetString()!);
         await page.GetByLabel("Quotation date", new() { Exact = true }).FillAsync(date);
-        await FillLineAsync(page.Locator("main fieldset").First, productId, "2", "12.5", "10", "5", $"Browser line {suffix}");
+        await FillLineAsync(page.Locator("main fieldset").First, productId, "2", "12.5", "10", "5", $"QA-2026-Browser line {suffix}");
         await page.GetByRole(AriaRole.Button, new() { Name = "Save quotation", Exact = true }).ClickAsync();
         await Assertions.Expect(page).ToHaveURLAsync(QuotationUrl(), new() { Timeout = 30_000 });
         await ReadyAsync(page);
@@ -49,7 +49,7 @@ internal static partial class SalesWorkflow
 
         await FollowAsync(page, "Edit");
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Edit quotation", Level = 1, Exact = true })).ToBeVisibleAsync();
-        await page.GetByLabel("Notes", new() { Exact = true }).FillAsync($"Updated browser quotation {suffix}");
+        await page.GetByLabel("Notes", new() { Exact = true }).FillAsync($"QA-2026-Updated browser quotation {suffix}");
         await page.Locator("main fieldset").First.GetByLabel("Quantity", new() { Exact = true }).FillAsync("3");
         await page.GetByRole(AriaRole.Button, new() { Name = "Add line", Exact = true }).ClickAsync();
         await FillLineAsync(page.Locator("main fieldset").Nth(1), productId, "1", "7", "0", "0", $"Additional line {suffix}");

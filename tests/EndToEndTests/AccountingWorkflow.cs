@@ -15,11 +15,11 @@ internal static class AccountingWorkflow
         var party = await PostAsync(page, baseUrl, "/api/v1/contacts/", new
         {
             kind = 1,
-            displayName = $"Browser accounting party {fixture.Suffix}",
-            organizationName = $"Browser accounting party {fixture.Suffix}",
+            displayName = $"QA-2026-Browser accounting party {fixture.Suffix}",
+            organizationName = $"QA-2026-Browser accounting party {fixture.Suffix}",
             isCustomer = true,
             isSupplier = true,
-            taxNumber = $"TAX-{fixture.Suffix}",
+            taxNumber = $"QA-2026-TAX-{fixture.Suffix}",
             billingAddress = new { line1 = "60 Accounting Street", city = "Test City", countryCode = "US" }
         });
         var sources = await CreateSourcesAsync(page, baseUrl, product, party, fixture, false);
@@ -121,14 +121,14 @@ internal static class AccountingWorkflow
             (Key: "EXPENSE", Code: "5000", Type: 4, Normal: 0)
         })
         {
-            var created = await PostAsync(page, baseUrl, "/api/v1/accounting/accounts", new { code = $"{account.Code}-{suffix}", name = $"Browser {account.Key} {suffix}", type = account.Type, normalBalance = account.Normal });
+            var created = await PostAsync(page, baseUrl, "/api/v1/accounting/accounts", new { code = $"QA-2026-{account.Code}-{suffix}", name = $"QA-2026-Browser {account.Key} {suffix}", type = account.Type, normalBalance = account.Normal });
             accounts.Add(account.Key, Id(created));
         }
         await VisitAsync(page, baseUrl, "/accounting/setup", "Accounting setup");
         var journalForm = Form(page, "Add journal");
-        var journalCode = $"E2E-{suffix}";
+        var journalCode = $"QA-2026-{suffix}";
         await journalForm.GetByLabel("Code", new() { Exact = true }).FillAsync(journalCode);
-        await journalForm.GetByLabel("Name", new() { Exact = true }).FillAsync($"Browser journal {suffix}");
+        await journalForm.GetByLabel("Name", new() { Exact = true }).FillAsync($"QA-2026-Browser journal {suffix}");
         await journalForm.GetByRole(AriaRole.Button, new() { Name = "Add journal", Exact = true }).ClickAsync();
         await SuccessAsync(page, "Journal added.");
         var journal = (await GetAsync(page, baseUrl, "/api/v1/accounting/journals")).EnumerateArray().Single(item => Text(item, "code") == journalCode);
@@ -138,7 +138,7 @@ internal static class AccountingWorkflow
         if (matching.Length == 0)
         {
             var periodForm = Form(page, "Add period");
-            var periodName = $"Browser fiscal year {suffix}";
+            var periodName = $"QA-2026-Browser fiscal year {suffix}";
             await periodForm.GetByLabel("Name", new() { Exact = true }).FillAsync(periodName);
             await periodForm.GetByLabel("Starts", new() { Exact = true }).FillAsync($"{DateTime.UtcNow.Year}-01-01");
             await periodForm.GetByLabel("Ends", new() { Exact = true }).FillAsync($"{DateTime.UtcNow.Year}-12-31");
@@ -179,7 +179,7 @@ internal static class AccountingWorkflow
     {
         await VisitAsync(page, baseUrl, "/accounting/entries", "General ledger");
         var form = Form(page, "Save draft");
-        var description = $"Browser manual entry {fixture.Suffix}";
+        var description = $"QA-2026-Browser manual entry {fixture.Suffix}";
         await SelectAsync(form, "Journal", fixture.JournalId);
         await form.GetByLabel("Business date", new() { Exact = true }).FillAsync(fixture.Date);
         await form.GetByLabel("Currency", new() { Exact = true }).FillAsync(fixture.Currency);
@@ -209,7 +209,7 @@ internal static class AccountingWorkflow
         Assert.Equal(Id(entry), reversal.GetProperty("reversesEntryId").GetGuid());
         foreach (var field in posted.EnumerateObject().Where(field => field.Name != "reversedByEntryId")) Assert.Equal(field.Value.GetRawText(), original.GetProperty(field.Name).GetRawText());
         var before = await GetAsync(page, baseUrl, "/api/v1/accounting/entries");
-        var invalid = await page.Context.APIRequest.PostAsync(Url(baseUrl, "/api/v1/accounting/entries"), new() { DataObject = EntryRequest(fixture, "Unbalanced browser rejection", 1, 2) });
+        var invalid = await page.Context.APIRequest.PostAsync(Url(baseUrl, "/api/v1/accounting/entries"), new() { DataObject = EntryRequest(fixture, "QA-2026-Unbalanced browser rejection", 1, 2) });
         Assert.Equal(400, invalid.Status);
         Assert.Equal(before.GetRawText(), (await GetAsync(page, baseUrl, "/api/v1/accounting/entries")).GetRawText());
     }
@@ -280,7 +280,7 @@ internal static class AccountingWorkflow
         await form.GetByLabel("Currency", new() { Exact = true }).FillAsync(fixture.Currency);
         await form.GetByLabel("Exchange rate", new() { Exact = true }).FillAsync("1");
         await form.GetByLabel("Amount", new() { Exact = true }).FillAsync(amount.ToString(CultureInfo.InvariantCulture));
-        var reference = $"Browser-{fixture.Suffix}-{suffix}";
+        var reference = $"QA-2026-Browser-{fixture.Suffix}-{suffix}";
         await form.GetByLabel("Reference", new() { Exact = true }).FillAsync(reference);
         await form.GetByLabel("Invoice or bill ID (optional)", new() { Exact = true }).FillAsync(Id(document).ToString());
         await form.GetByLabel("Allocated amount", new() { Exact = true }).FillAsync(amount.ToString(CultureInfo.InvariantCulture));
@@ -348,9 +348,9 @@ internal static class AccountingWorkflow
     {
         await VisitAsync(page, baseUrl, "/accounting/controls", "Tax and currency controls");
         var taxForm = Form(page, "Add tax code");
-        var code = $"E2E-{fixture.Suffix}";
+        var code = $"QA-2026-{fixture.Suffix}";
         await taxForm.GetByLabel("Code", new() { Exact = true }).FillAsync(code);
-        await taxForm.GetByLabel("Name", new() { Exact = true }).FillAsync($"Browser ten percent {fixture.Suffix}");
+        await taxForm.GetByLabel("Name", new() { Exact = true }).FillAsync($"QA-2026-Browser ten percent {fixture.Suffix}");
         await taxForm.GetByLabel("Rate %", new() { Exact = true }).FillAsync("10");
         await SelectAsync(taxForm, "Output tax account", fixture.Accounts["TAX-OUT"]);
         await SelectAsync(taxForm, "Input tax account", fixture.Accounts["TAX-IN"]);
@@ -406,7 +406,7 @@ internal static class AccountingWorkflow
         currencyCode = fixture.Currency,
         exchangeRate = 1,
         idempotencyKey = Guid.NewGuid().ToString("N"),
-        lines = new[] { new { accountId = fixture.Accounts["EXPENSE"], description = "Browser debit", debit, credit = 0m }, new { accountId = fixture.Accounts["REVENUE"], description = "Browser credit", debit = 0m, credit } }
+        lines = new[] { new { accountId = fixture.Accounts["EXPENSE"], description = "QA-2026-Browser debit", debit, credit = 0m }, new { accountId = fixture.Accounts["REVENUE"], description = "QA-2026-Browser credit", debit = 0m, credit } }
     };
 
     private static async Task<JsonElement> AssertJournalAsync(IPage page, string baseUrl, Fixture fixture, Guid entryId, params (Guid Account, decimal Debit, decimal Credit)[] expected)

@@ -12,8 +12,8 @@ internal static partial class CrmWorkflow
         var suffix = Guid.NewGuid().ToString("N")[..8];
         var stages = await GetJsonAsync(page, baseUrl, "/api/v1/crm/stages/?includeInactive=true");
         var sequence = stages.EnumerateArray().Select(stage => stage.GetProperty("sequence").GetInt32()).DefaultIfEmpty(0).Max() + 10;
-        var openName = $"Browser open {suffix}";
-        var wonName = $"Browser won {suffix}";
+        var openName = $"QA-2026-Browser open {suffix}";
+        var wonName = $"QA-2026-Browser won {suffix}";
         await VisitAsync(page, baseUrl, "/crm/stages", "Pipeline stages");
         await AddStageAsync(page, openName, sequence, false);
         await AddStageAsync(page, wonName, sequence + 10, true);
@@ -21,7 +21,7 @@ internal static partial class CrmWorkflow
         var openId = stages.EnumerateArray().Single(stage => stage.GetProperty("name").GetString() == openName).GetProperty("id").GetGuid();
         var wonId = stages.EnumerateArray().Single(stage => stage.GetProperty("name").GetString() == wonName).GetProperty("id").GetGuid();
 
-        var title = $"Browser lead {suffix}";
+        var title = $"QA-2026-Browser lead {suffix}";
         await VisitAsync(page, baseUrl, "/crm/leads/new", "New lead");
         await page.GetByLabel("Title", new() { Exact = true }).FillAsync(title);
         await page.GetByLabel("Expected revenue", new() { Exact = true }).FillAsync("1200");
@@ -33,20 +33,20 @@ internal static partial class CrmWorkflow
         await ExpectPathAsync(page, leadPath);
         await FollowAsync(page, "Edit");
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Edit lead", Level = 1, Exact = true })).ToBeVisibleAsync();
-        title = $"Updated browser lead {suffix}";
+        title = $"QA-2026-Updated browser lead {suffix}";
         var leadTitle = page.GetByLabel("Title", new() { Exact = true });
         await leadTitle.FillAsync($" {title} ");
         await page.GetByRole(AriaRole.Button, new() { Name = "Save lead", Exact = true }).ClickAsync();
         await Assertions.Expect(leadTitle).ToHaveValueAsync(title);
         await VisitAsync(page, baseUrl, leadPath, title);
         await AssignAsync(page, leadPath);
-        await VerifyActivityAsync(page, leadPath, $"Browser follow-up {suffix}");
+        await VerifyActivityAsync(page, leadPath, $"QA-2026-Browser follow-up {suffix}");
         await VerifyArchiveAsync(page, leadPath);
 
         var lead = await GetJsonAsync(page, baseUrl, $"/api/v1/crm/leads/{leadId}");
         var qualified = await PostJsonAsync(page, baseUrl, $"/api/v1/crm/leads/{leadId}/qualify",
             new { concurrencyStamp = lead.GetProperty("concurrencyStamp").GetString() });
-        var opportunityTitle = $"Browser opportunity {suffix}";
+        var opportunityTitle = $"QA-2026-Browser opportunity {suffix}";
         var opportunity = await PostJsonAsync(page, baseUrl, $"/api/v1/crm/leads/{leadId}/convert",
             new { concurrencyStamp = qualified.GetProperty("concurrencyStamp").GetString(), stageId = openId, title = opportunityTitle });
         Assert.Equal(leadId, opportunity.GetProperty("sourceLeadId").GetGuid());
@@ -59,7 +59,7 @@ internal static partial class CrmWorkflow
 
         await FollowAsync(page, "Manage");
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Manage opportunity", Level = 1, Exact = true })).ToBeVisibleAsync();
-        opportunityTitle = $"Updated browser opportunity {suffix}";
+        opportunityTitle = $"QA-2026-Updated browser opportunity {suffix}";
         await page.GetByLabel("Title", new() { Exact = true }).FillAsync(opportunityTitle);
         await page.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true }).ClickAsync();
         await ExpectPathAsync(page, opportunityPath);

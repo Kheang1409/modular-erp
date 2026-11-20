@@ -13,7 +13,7 @@ internal static class MultiCompanyWorkflow
         var original = initialCompanies.Single(company => company.GetProperty("isCurrent").GetBoolean());
         var originalId = original.GetProperty("id").GetGuid();
         var suffix = Guid.NewGuid().ToString("N")[..10];
-        var companyCode = $"BROWSER-{suffix}".ToUpperInvariant();
+        var companyCode = $"QA-2026-BROWSER-{suffix}".ToUpperInvariant();
         Guid? createdCompanyId = null;
         Guid? createdUserId = null;
         Exception? workflowFailure = null;
@@ -29,7 +29,7 @@ internal static class MultiCompanyWorkflow
             await Assertions.Expect(page.Locator(".shell")).ToHaveAttributeAsync("data-interactive", "true");
             await page.GetByRole(AriaRole.Button, new() { Name = "Add company", Exact = true }).ClickAsync();
             var editor = page.Locator(".company-editor");
-            await editor.GetByLabel("Name", new() { Exact = false }).FillAsync($"Browser company {suffix}");
+            await editor.GetByLabel("Name", new() { Exact = false }).FillAsync($"QA-2026-Browser company {suffix}");
             await editor.GetByLabel("Company code", new() { Exact = false }).FillAsync(companyCode);
             await editor.GetByLabel("Base currency", new() { Exact = false }).FillAsync("USD");
             await editor.GetByLabel("Time zone", new() { Exact = false }).FillAsync("UTC");
@@ -55,7 +55,7 @@ internal static class MultiCompanyWorkflow
             await page.GotoAsync(Url(baseUrl, "/products/new"));
             await Assertions.Expect(page.Locator(".shell")).ToHaveAttributeAsync("data-interactive", "true");
             await page.Locator("label").Filter(new() { HasText = "SKU" }).Locator("input").FillAsync(originalSku);
-            await page.Locator("label").Filter(new() { HasText = "Name" }).Locator("input").FillAsync("Company-isolated browser product");
+            await page.Locator("label").Filter(new() { HasText = "Name" }).Locator("input").FillAsync("QA-2026-Company-isolated browser product");
             await page.GetByRole(AriaRole.Button, new() { Name = "Save product" }).ClickAsync();
             await page.WaitForURLAsync("**/products/*/details");
             var isolatedProductId = page.Url.Split('/')[^2];
@@ -75,13 +75,13 @@ internal static class MultiCompanyWorkflow
             await page.GotoAsync(Url(baseUrl, "/administration/roles"));
             await Assertions.Expect(page.Locator(".shell")).ToHaveAttributeAsync("data-interactive", "true");
             await page.GetByRole(AriaRole.Button, new() { Name = "Add role", Exact = true }).ClickAsync();
-            await page.GetByLabel("Role name", new() { Exact = false }).FillAsync($"Browser reader {suffix}");
+            await page.GetByLabel("Role name", new() { Exact = false }).FillAsync($"QA-2026-Browser reader {suffix}");
             await page.GetByRole(AriaRole.Checkbox, new() { Name = "View organization context", Exact = true }).CheckAsync();
             await page.GetByRole(AriaRole.Checkbox, new() { Name = "View products", Exact = true }).CheckAsync();
             await page.GetByRole(AriaRole.Button, new() { Name = "Save role", Exact = true }).ClickAsync();
-            await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = $"Browser reader {suffix} was saved." })).ToBeVisibleAsync();
+            await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = $"QA-2026-Browser reader {suffix} was saved." })).ToBeVisibleAsync();
             Assert.Empty((await page.RunAxe()).Violations ?? []);
-            var userEmail = $"browser-{suffix}@example.test";
+            var userEmail = $"QA-2026-browser-{suffix}@example.test";
             var userPassword = $"Browser!7a{Guid.NewGuid():N}";
             await page.GotoAsync(Url(baseUrl, "/administration/users"));
             await Assertions.Expect(page.Locator(".shell")).ToHaveAttributeAsync("data-interactive", "true");
@@ -89,7 +89,7 @@ internal static class MultiCompanyWorkflow
             var accessEditor = page.GetByRole(AriaRole.Region, new() { Name = "User access editor", Exact = true });
             await accessEditor.GetByLabel("Email address", new() { Exact = true }).FillAsync(userEmail);
             await accessEditor.GetByLabel("Initial password", new() { Exact = true }).FillAsync(userPassword);
-            await accessEditor.Locator("label.checkbox-field").Filter(new() { HasText = $"Browser reader {suffix}" }).Locator("input").CheckAsync();
+            await accessEditor.Locator("label.checkbox-field").Filter(new() { HasText = $"QA-2026-Browser reader {suffix}" }).Locator("input").CheckAsync();
             await accessEditor.GetByRole(AriaRole.Button, new() { Name = "Create user", Exact = true }).ClickAsync();
             await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "User created." })).ToBeVisibleAsync();
             var usersResponse = await page.Context.APIRequest.GetAsync(Url(baseUrl, "/api/v1/platform/users"));

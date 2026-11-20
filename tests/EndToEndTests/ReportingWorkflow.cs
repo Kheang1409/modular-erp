@@ -42,7 +42,7 @@ internal static class ReportingWorkflow
         {
             journalId = fixture.JournalId,
             businessDate = Date(fixture.BusinessDate),
-            description = $"Browser reporting, \"pagination\" {suffix}",
+            description = $"QA-2026-Browser reporting, \"pagination\" {suffix}",
             currencyCode = fixture.Currency,
             exchangeRate = 1,
             lines,
@@ -74,7 +74,7 @@ internal static class ReportingWorkflow
                 sourceLocationId = gain.GetProperty("sourceLocationId").GetGuid(),
                 destinationLocationId = gain.GetProperty("destinationLocationId").GetGuid(),
                 businessDate = Date(date),
-                notes = $"Browser report movement {suffix}-{index}"
+                notes = $"QA-2026-Browser report movement {suffix}-{index}"
             });
             var completed = await PostAsync(page, baseUrl, "movement-complete", $"/api/v1/inventory/moves/{Id(draft)}/complete",
                 new { concurrencyStamp = Stamp(draft), idempotencyKey = $"report-move-{suffix}-{index}" });
@@ -88,8 +88,8 @@ internal static class ReportingWorkflow
         var party = await PostAsync(page, baseUrl, "aging-party-create", "/api/v1/contacts/", new
         {
             kind = 1,
-            displayName = $"Browser report, \"aging\" {suffix}",
-            organizationName = $"Browser report, \"aging\" {suffix}",
+            displayName = $"QA-2026-Browser report, \"aging\" {suffix}",
+            organizationName = $"QA-2026-Browser report, \"aging\" {suffix}",
             isCustomer = true,
             isSupplier = true,
             taxNumber = $"REPORT-{suffix}",

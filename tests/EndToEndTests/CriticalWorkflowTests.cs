@@ -65,9 +65,9 @@ public sealed partial class CriticalWorkflowTests(ITestOutputHelper output)
         await page.GotoAsync(new Uri(new Uri(baseUrl), "/products/new").ToString());
         await Assertions.Expect(page.Locator(".shell")).ToHaveAttributeAsync("data-interactive", "true");
         Assert.DoesNotContain("_error", await page.Locator("body").InnerTextAsync(), StringComparison.Ordinal);
-        var productSku = $"E2E-{Guid.NewGuid():N}"[..16].ToUpperInvariant();
+        var productSku = $"QA-2026-{Guid.NewGuid():N}"[..24].ToUpperInvariant();
         await page.Locator("label").Filter(new() { HasText = "SKU" }).Locator("input").FillAsync(productSku);
-        await page.Locator("label").Filter(new() { HasText = "Name" }).Locator("input").FillAsync("Browser workflow product");
+        await page.Locator("label").Filter(new() { HasText = "Name" }).Locator("input").FillAsync("QA-2026-Browser workflow product");
         try
         {
             await page.GetByRole(AriaRole.Button, new() { Name = "Save product" }).ClickAsync();
@@ -82,7 +82,7 @@ public sealed partial class CriticalWorkflowTests(ITestOutputHelper output)
             throw;
         }
         Assert.DoesNotContain("Product validation failed", await page.Locator("body").InnerTextAsync(), StringComparison.OrdinalIgnoreCase);
-        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Browser workflow product", Level = 1 })).ToBeVisibleAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "QA-2026-Browser workflow product", Level = 1 })).ToBeVisibleAsync();
         var productAccessibility = await page.RunAxe();
         Assert.Empty(productAccessibility.Violations ?? []);
         await VerifyProductEditingAsync(page);
@@ -90,6 +90,7 @@ public sealed partial class CriticalWorkflowTests(ITestOutputHelper output)
         await SalesWorkflow.VerifyAsync(page, baseUrl, productSku);
         await PurchasingWorkflow.VerifyAsync(page, baseUrl, productSku);
         await InventoryWorkflow.VerifyAsync(page, baseUrl, productSku);
+        await ExtendedModuleWorkflow.VerifyAsync(page, baseUrl, productSku);
         var accounting = await AccountingWorkflow.VerifyAsync(page, baseUrl, productSku);
         output.WriteLine("ERP_E2E_PHASE=reporting-workflow");
         await ReportingWorkflow.VerifyAsync(page, baseUrl, productSku, accounting);
@@ -212,16 +213,16 @@ public sealed partial class CriticalWorkflowTests(ITestOutputHelper output)
         await Assertions.Expect(page.Locator(".shell")).ToHaveAttributeAsync("data-interactive", "true");
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Edit product", Level = 1, Exact = true })).ToBeVisibleAsync();
         var name = page.Locator("label").Filter(new() { HasText = "Name" }).Locator("input");
-        await Assertions.Expect(name).ToHaveValueAsync("Browser workflow product");
+        await Assertions.Expect(name).ToHaveValueAsync("QA-2026-Browser workflow product");
         Assert.Equal(0, await page.Locator(".error-panel, main [role='alert']").CountAsync());
         Assert.Empty((await page.RunAxe()).Violations ?? []);
 
         // The normalized value appears only after the server has saved and rebound the form.
-        await name.FillAsync(" Browser workflow product updated ");
+        await name.FillAsync(" QA-2026-Browser workflow product updated ");
         await page.GetByRole(AriaRole.Button, new() { Name = "Save product", Exact = true }).ClickAsync();
-        await Assertions.Expect(name).ToHaveValueAsync("Browser workflow product updated");
+        await Assertions.Expect(name).ToHaveValueAsync("QA-2026-Browser workflow product updated");
         await page.GetByRole(AriaRole.Link, new() { Name = "View product", Exact = true }).ClickAsync();
-        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Browser workflow product updated", Level = 1, Exact = true })).ToBeVisibleAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "QA-2026-Browser workflow product updated", Level = 1, Exact = true })).ToBeVisibleAsync();
 
         foreach (var action in new[] { (Button: "Archive", Status: "Archived"), (Button: "Reactivate", Status: "Active") })
         {
