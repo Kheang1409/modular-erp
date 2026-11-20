@@ -6,6 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <DefaultItemExcludes>$(DefaultItemExcludes);**/artifacts/**;**/build_out/**;**/build_outDebug/**</DefaultItemExcludes>
     <VersionPrefix>0.1.0</VersionPrefix>
     <Authors>Open ERP contributors</Authors>
     <Product>Open ERP</Product>
