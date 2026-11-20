@@ -572,7 +572,7 @@ h3 { font-size: 1.04rem; }
 .nav-group summary {
     min-height: 2.5rem;
     padding-inline: .8rem;
-    color: #86868b;
+    color: #6e6e73;
     font-size: .68rem;
     letter-spacing: .075em;
     text-transform: uppercase;
@@ -589,7 +589,7 @@ h3 { font-size: 1.04rem; }
     backdrop-filter: saturate(180%) blur(22px);
     -webkit-backdrop-filter: saturate(180%) blur(22px);
 }
-.workspace-context > span { color: #86868b; }
+.workspace-context > span { color: #6e6e73; }
 .workspace-context strong { letter-spacing: -.015em; }
 .company-label, .company-switcher select {
     border-color: var(--line);
@@ -621,7 +621,7 @@ button, .button, .btn {
     font-weight: 600;
     letter-spacing: -.01em;
     box-shadow: none;
-    transition: color .18s ease, background-color .18s ease, border-color .18s ease, box-shadow .22s ease, transform .22s cubic-bezier(.2, .7, .2, 1);
+    transition: background-color .18s ease, border-color .18s ease, box-shadow .22s ease, transform .22s cubic-bezier(.2, .7, .2, 1);
 }
 button:not(:disabled):not(.sidebar-scrim):hover, .button:not(.is-disabled):hover, .btn:hover {
     background-color: var(--brand-strong);
