@@ -106,7 +106,7 @@
             file.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/csv"); content.Add(file, "file", _file.Name);
             using var response = await Http.PostAsync("api/v1/hcm/employees/import", content);
             var result = await response.Content.ReadFromJsonAsync<ImportResult>();
-            if (!response.IsSuccessStatusCode) throw new InvalidOperationException(result?.Errors.FirstOrDefault() ?? "Employee import failed.");
+            if (!response.IsSuccessStatusCode) throw new InvalidOperationException(result?.Errors.FirstOrDefault() ?? $"Employee import failed (HTTP {(int)response.StatusCode}).");
             _importSummary = $"Imported {result?.ImportedCount ?? 0} employee(s)."; _importErrors.AddRange(result?.Errors ?? []); _file = null; await LoadAsync();
         }
         catch (Exception exception) { _error = exception.Message; }

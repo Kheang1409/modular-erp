@@ -162,7 +162,7 @@ public sealed class ContactService(
         using var reader = new StreamReader(csv, Encoding.UTF8, true, leaveOpen: true);
         var header = await reader.ReadLineAsync(cancellationToken);
         if (header is null) return new(0, ["CSV is empty."]);
-        var columns = ParseCsvLine(header).Select((value, index) => (value: value.Trim().ToLowerInvariant(), index))
+        var columns = ParseCsvLine(header.TrimStart('\uFEFF')).Select((value, index) => (value: value.Trim().ToLowerInvariant(), index))
             .ToDictionary(x => x.value, x => x.index, StringComparer.OrdinalIgnoreCase);
         if (!columns.ContainsKey("kind") || !columns.ContainsKey("displayname"))
             return new(0, ["Header must include kind and displayName."]);

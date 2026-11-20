@@ -283,7 +283,7 @@ internal static class HcmEndpoints
         using var reader = new StreamReader(file.OpenReadStream(), Encoding.UTF8, true);
         var header = await reader.ReadLineAsync(token);
         if (header is null) return Results.BadRequest(new EmployeeImportResult(0, ["CSV is empty."]));
-        var columns = ParseCsv(header).Select((value, index) => (Name: value.Trim(), Index: index)).ToDictionary(x => x.Name, x => x.Index, StringComparer.OrdinalIgnoreCase);
+        var columns = ParseCsv(header.TrimStart('\uFEFF')).Select((value, index) => (Name: value.Trim(), Index: index)).ToDictionary(x => x.Name, x => x.Index, StringComparer.OrdinalIgnoreCase);
         var required = new[] { "employeeNumber", "fullName", "email", "hireDate" };
         if (required.Any(x => !columns.ContainsKey(x))) return Results.BadRequest(new EmployeeImportResult(0, ["Header must include employeeNumber, fullName, email, and hireDate."]));
         var errors = new List<string>(); var imported = 0; var row = 1;

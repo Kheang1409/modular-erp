@@ -63,7 +63,7 @@
             await using var stream = _file.OpenReadStream(5_000_000); using var content = new MultipartFormDataContent(); using var file = new StreamContent(stream);
             file.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/csv"); content.Add(file, "file", _file.Name);
             using var response = await Http.PostAsync("api/v1/contacts/import", content); var result = await response.Content.ReadFromJsonAsync<ContactImportResult>();
-            if (!response.IsSuccessStatusCode) throw new InvalidOperationException(result?.Error ?? "Contact import failed.");
+            if (!response.IsSuccessStatusCode) throw new InvalidOperationException(result?.Error ?? $"Contact import failed (HTTP {(int)response.StatusCode}).");
             _importSummary = $"Imported {result?.Imported ?? 0} contact(s)."; _importErrors.AddRange(result?.Errors ?? []); _file = null;
             _page = await Contacts.SearchAsync(new(Search, SelectedKind, IncludeArchived, Page: EffectivePage, IsCustomer: IsCustomer, IsSupplier: IsSupplier), CancellationToken.None);
         }
