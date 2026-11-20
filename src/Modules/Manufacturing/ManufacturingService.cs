@@ -42,8 +42,14 @@ public sealed class ManufacturingService(
         if (policy is null)
         {
             if (!string.IsNullOrEmpty(request.ConcurrencyStamp)) throw new ManufacturingConcurrencyException();
-            policy = new ProductionCapacityPolicy { Id = Guid.NewGuid(), TenantId = tenant, CompanyId = company,
-                HoursPerDay = request.HoursPerDay, ConcurrencyStamp = NewStamp() };
+            policy = new ProductionCapacityPolicy
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenant,
+                CompanyId = company,
+                HoursPerDay = request.HoursPerDay,
+                ConcurrencyStamp = NewStamp()
+            };
             database.ProductionCapacityPolicies.Add(policy);
         }
         else
