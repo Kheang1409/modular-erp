@@ -773,7 +773,7 @@ public sealed class HcmService(
                             errors[$"employee:{employee.EmployeeNumber}:breaks:{workDate:yyyy-MM-dd}"] = ["Unpaid breaks exceed shift duration."];
                             continue;
                         }
-                var requiredOvertime = decimal.Max(0, workedHours - dailyStandardHours);
+                        var requiredOvertime = decimal.Max(0, workedHours - dailyStandardHours);
                         if (decimal.Abs(record.ApprovedOvertimeHours - requiredOvertime) > 0.01m)
                         {
                             errors[$"employee:{employee.EmployeeNumber}:overtime:{workDate:yyyy-MM-dd}"] =
@@ -1449,14 +1449,30 @@ public sealed class HcmService(
         var now = clock.UtcNow;
         var entity = new PayrollAdjustmentRecord
         {
-            Id = Guid.NewGuid(), TenantId = RequireTenant(), CompanyId = RequireCompany(), PayrollRunId = run.Id,
-            EmployeeId = line.EmployeeId, OriginalPeriodStart = run.PeriodStart, OriginalPeriodEnd = run.PeriodEnd,
-            EmployeeNumber = line.EmployeeNumber, EmployeeName = line.EmployeeName, Category = request.Category,
+            Id = Guid.NewGuid(),
+            TenantId = RequireTenant(),
+            CompanyId = RequireCompany(),
+            PayrollRunId = run.Id,
+            EmployeeId = line.EmployeeId,
+            OriginalPeriodStart = run.PeriodStart,
+            OriginalPeriodEnd = run.PeriodEnd,
+            EmployeeNumber = line.EmployeeNumber,
+            EmployeeName = line.EmployeeName,
+            Category = request.Category,
             CalculationMode = PayrollAdjustmentCalculationMode.Manual,
-            Status = PayrollAdjustmentStatus.Draft, Reason = reason, EffectiveDate = request.EffectiveDate,
-            CurrencyCode = run.CurrencyCode, Amount = amount, EvidenceReference = evidence,
-            SnapshotJson = "{}", SnapshotRevision = string.Empty, IdempotencyKey = key, CreatedByUserId = creatorId,
-            CreatedAtUtc = now, UpdatedAtUtc = now, ConcurrencyStamp = NewStamp()
+            Status = PayrollAdjustmentStatus.Draft,
+            Reason = reason,
+            EffectiveDate = request.EffectiveDate,
+            CurrencyCode = run.CurrencyCode,
+            Amount = amount,
+            EvidenceReference = evidence,
+            SnapshotJson = "{}",
+            SnapshotRevision = string.Empty,
+            IdempotencyKey = key,
+            CreatedByUserId = creatorId,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+            ConcurrencyStamp = NewStamp()
         };
         var adjustmentSnapshot = new PayrollAdjustmentSnapshot("1", entity.Id, run.Id, line.EmployeeId,
             run.PeriodStart, run.PeriodEnd, revision, run.Status, request.Category, categoryMapping, request.EffectiveDate, run.CurrencyCode,
@@ -1529,14 +1545,30 @@ public sealed class HcmService(
         var now = clock.UtcNow;
         var entity = new PayrollAdjustmentRecord
         {
-            Id = Guid.NewGuid(), TenantId = RequireTenant(), CompanyId = RequireCompany(), PayrollRunId = run.Id,
-            EmployeeId = line.EmployeeId, OriginalPeriodStart = run.PeriodStart, OriginalPeriodEnd = run.PeriodEnd,
-            EmployeeNumber = line.EmployeeNumber, EmployeeName = line.EmployeeName, Category = request.Category,
+            Id = Guid.NewGuid(),
+            TenantId = RequireTenant(),
+            CompanyId = RequireCompany(),
+            PayrollRunId = run.Id,
+            EmployeeId = line.EmployeeId,
+            OriginalPeriodStart = run.PeriodStart,
+            OriginalPeriodEnd = run.PeriodEnd,
+            EmployeeNumber = line.EmployeeNumber,
+            EmployeeName = line.EmployeeName,
+            Category = request.Category,
             CalculationMode = PayrollAdjustmentCalculationMode.Recalculated,
-            Status = PayrollAdjustmentStatus.Draft, Reason = reason, EffectiveDate = request.EffectiveDate,
-            CurrencyCode = run.CurrencyCode, Amount = amount, EvidenceReference = evidence,
-            SnapshotJson = "{}", SnapshotRevision = string.Empty, IdempotencyKey = key, CreatedByUserId = creatorId,
-            CreatedAtUtc = now, UpdatedAtUtc = now, ConcurrencyStamp = NewStamp()
+            Status = PayrollAdjustmentStatus.Draft,
+            Reason = reason,
+            EffectiveDate = request.EffectiveDate,
+            CurrencyCode = run.CurrencyCode,
+            Amount = amount,
+            EvidenceReference = evidence,
+            SnapshotJson = "{}",
+            SnapshotRevision = string.Empty,
+            IdempotencyKey = key,
+            CreatedByUserId = creatorId,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+            ConcurrencyStamp = NewStamp()
         };
         var adjustmentSnapshot = new PayrollAdjustmentSnapshot("1", entity.Id, run.Id, line.EmployeeId,
             run.PeriodStart, run.PeriodEnd, revision, run.Status, request.Category,
@@ -1831,9 +1863,15 @@ public sealed class HcmService(
     private void AddAdjustmentEvent(PayrollAdjustmentRecord entity, PayrollAdjustmentStatus status, string reason) =>
         database.PayrollAdjustmentEvents.Add(new PayrollAdjustmentEvent
         {
-            Id = Guid.NewGuid(), TenantId = entity.TenantId, CompanyId = entity.CompanyId,
-            PayrollAdjustmentId = entity.Id, Status = status, ActorUserId = CurrentUserId(), Reason = reason,
-            SnapshotRevision = entity.SnapshotRevision, OccurredAtUtc = clock.UtcNow
+            Id = Guid.NewGuid(),
+            TenantId = entity.TenantId,
+            CompanyId = entity.CompanyId,
+            PayrollAdjustmentId = entity.Id,
+            Status = status,
+            ActorUserId = CurrentUserId(),
+            Reason = reason,
+            SnapshotRevision = entity.SnapshotRevision,
+            OccurredAtUtc = clock.UtcNow
         });
 
     private static PayrollAdjustmentDto ToPayrollAdjustmentDto(PayrollAdjustmentRecord x) => new(x.Id,
